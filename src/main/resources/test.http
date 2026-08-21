@@ -1,0 +1,79 @@
+### [시나리오 1] 강사 회원가입
+POST http://localhost:8080/api/members/signup
+Content-Type: application/json
+
+{
+  "email": "test1t@test.com",
+  "password": "test1234",
+  "name": "김선생",
+  "phone": "01012345677",
+  "role": "TEACHER",
+  "academyId": 1
+}
+
+###
+POST http://localhost:8080/api/members/signup
+Content-Type: application/json
+
+{
+  "email": "test1p@test.com",
+  "password": "test1234",
+  "name": "곽효정",
+  "phone": "0102345678",
+  "role": "PARENT",
+  "academyId": 1,
+  "children": [
+    {
+      "childName": "먼지",
+      "birthDate": "2021-08-08",
+      "gender": "MALE",
+      "schoolName": "포레나초등학교"
+    }
+  ]
+}
+
+
+### 🏢 1. 키즈 키즈 수영장 등록
+POST http://localhost:8080/api/academies/register
+Content-Type: application/json
+
+{
+  "name": "테스트1 수영장",
+  "address": "서울시 강남구 어딘가"
+}
+
+### 🏢 2. 에듀 베스트 영어학원 등록
+POST http://localhost:8080/api/academies/register
+Content-Type: application/json
+
+{
+  "name": "에듀베스트 영어학원",
+  "address": "서울시 서초구 서초동 567-8"
+}
+
+### 🏢 3. 하이탑 수학전문학원 등록
+POST http://localhost:8080/api/academies/register
+Content-Type: application/json
+
+{
+  "name": "하이탑 수학전문학원",
+  "address": "경기도 성남시 분당구 정자동 99"
+}
+
+### 🏢 4. 리치 축구 클럽 등록
+POST http://localhost:8080/api/academies/register
+Content-Type: application/json
+
+{
+  "name": "리치 축구 클럽",
+  "address": "서울시 송파구 잠실동 45-1"
+}
+
+### 🏢 5. 프리미엄 음악 아카데미 등록
+POST http://localhost:8080/api/academies/register
+Content-Type: application/json
+
+{
+  "name": "프리미엄 음악 아카데미",
+  "address": "부산시 해운대구 우동 888"
+}
