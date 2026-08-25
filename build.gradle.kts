@@ -43,6 +43,13 @@ dependencies {
    annotationProcessor("org.projectlombok:lombok")
    testImplementation("org.springframework.boot:spring-boot-starter-test")
    testImplementation("org.springframework.kafka:spring-kafka-test")
+
+   // Testcontainers — 실제 Postgres/Redis/Kafka를 띄워 검증하는 통합테스트용
+   // (버전은 Spring Boot의 dependency-management BOM이 맞춰 관리한다)
+   testImplementation("org.testcontainers:junit-jupiter")
+   testImplementation("org.testcontainers:postgresql")
+   testImplementation("org.testcontainers:kafka")
+
    testCompileOnly("org.projectlombok:lombok")
    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
    testAnnotationProcessor("org.projectlombok:lombok")

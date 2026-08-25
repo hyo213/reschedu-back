@@ -6,11 +6,13 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Random;
+import java.security.SecureRandom;
 
 @Service
 @RequiredArgsConstructor
 public class EmailAuthService {
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final EmailAuthRepository emailAuthRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -20,8 +22,8 @@ public class EmailAuthService {
      */
     @Transactional
     public void sendAuthCode(String email) {
-        // 6자리 난수 생성 (예: 123456)
-        String authCode = String.format("%06d", new Random().nextInt(1000000));
+        // 6자리 난수 생성 (예: 123456) — 예측 가능한 java.util.Random 대신 SecureRandom을 쓴다.
+        String authCode = String.format("%06d", SECURE_RANDOM.nextInt(1000000));
 
         // DB에 유효시간 3분짜리 인증 객체 저장 (Redis 대용)
         EmailAuth emailAuth = new EmailAuth(email, authCode, 3);

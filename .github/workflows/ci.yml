@@ -10,10 +10,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -25,14 +25,16 @@ jobs:
       - name: Compile
         run: ./gradlew compileJava compileTestJava --no-daemon
 
-      # RescheduApplicationTests(전체 컨텍스트 로딩)는 실제 Postgres/Redis/Kafka가 필요해 제외한다.
-      # 나머지는 Mockito 기반 순수 단위 테스트라 별도 인프라 없이 여기서 검증 가능하다.
-      - name: Run unit tests
-        run: ./gradlew test --tests "com.academy.reschedu.domain.*" --no-daemon
+      # RescheduApplicationTests(전체 컨텍스트 로딩)는 로컬 환경변수로 지정한 실제 Postgres에
+      # 의존해 여기서는 제외한다. domain.*는 Mockito 기반 단위 테스트, integration.*는
+      # Testcontainers로 실제 Postgres/Redis/Kafka를 띄워 검증하는 통합 테스트다
+      # (GitHub Actions ubuntu 러너는 Docker를 기본 지원하므로 별도 서비스 설정이 필요 없다).
+      - name: Run tests
+        run: ./gradlew test --tests "com.academy.reschedu.domain.*" --tests "com.academy.reschedu.integration.*" --no-daemon
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: build/reports/tests/test
