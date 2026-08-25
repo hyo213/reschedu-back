@@ -4,6 +4,7 @@ import com.academy.reschedu.global.security.jwt.JwtAuthenticationFilter;
 import com.academy.reschedu.global.security.jwt.JwtCookieProvider;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +17,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
@@ -25,6 +27,14 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final JwtCookieProvider jwtCookieProvider;
+
+    // 로컬 개발 기본값 외에 추가로 허용할 정확한 출처(콤마 구분) — 예: ngrok으로 외부 테스트할 때만
+    // 그 순간의 정확한 https://xxxx.ngrok-free.dev 값을 채운다. 와일드카드는 절대 쓰지 않는다 —
+    // ngrok-free.dev/app 등은 누구나 서브도메인을 발급받을 수 있는 공유 도메인이라 allowCredentials와
+    // 함께 와일드카드를 허용하면 공격자의 터널 origin도 함께 신뢰하게 되어 쿠키 기반 요청을 그대로
+    // 노출시킨다(CSRF류 자격증명 탈취).
+    @Value("${app.cors.extra-allowed-origins:}")
+    private String extraAllowedOrigins;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -38,11 +48,17 @@ public class SecurityConfig {
 
                 .cors(cors -> cors.configurationSource(request -> {
                     var config = new org.springframework.web.cors.CorsConfiguration();
-                    config.setAllowedOrigins(List.of("http://localhost:3000"));
+                    List<String> allowedOrigins = new ArrayList<>(List.of("http://localhost:3000"));
+                    for (String origin : extraAllowedOrigins.split(",")) {
+                        if (!origin.isBlank()) {
+                            allowedOrigins.add(origin.trim());
+                        }
+                    }
+                    // 정확한 출처만 허용한다(와일드카드 금지 — 위 필드 주석 참고).
+                    config.setAllowedOrigins(allowedOrigins);
                     config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE"));
                     config.setAllowedHeaders(List.of("*"));
                     // httpOnly 쿠키(JWT)를 크로스 오리진(3000 -> 8080)으로 보내려면 필수.
-                    // allowCredentials=true일 때는 allowedOrigins에 "*"를 쓸 수 없어 출처를 명시해야 한다.
                     config.setAllowCredentials(true);
                     return config;
                 }))
