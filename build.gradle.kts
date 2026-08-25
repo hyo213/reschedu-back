@@ -25,6 +25,10 @@ dependencies {
    implementation("org.springframework.boot:spring-boot-starter-mail:3.5.14")
    implementation("org.springframework.kafka:spring-kafka")
 
+   // Observability — Redis 락 대기/실패, Kafka 컨슈머 랙 등을 Prometheus로 노출
+   implementation("org.springframework.boot:spring-boot-starter-actuator")
+   implementation("io.micrometer:micrometer-registry-prometheus")
+
    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")

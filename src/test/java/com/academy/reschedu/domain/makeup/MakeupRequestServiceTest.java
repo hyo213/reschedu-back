@@ -67,6 +67,8 @@ class MakeupRequestServiceTest {
     private CurrentMemberProvider currentMemberProvider;
     @Mock
     private RedissonClient redissonClient;
+    @org.mockito.Spy
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
 
     @InjectMocks
     private MakeupRequestService makeupRequestService;

@@ -62,6 +62,10 @@ public class SecurityConfig {
                                 "/api/academies/register"
                         ).permitAll()
 
+                        // 🚨 로컬/포트폴리오 데모 전제의 개방이다 — 실제 운영 환경이라면 이 경로는 별도 관리
+                        // 네트워크로 격리하거나 인증을 걸어야 한다(Prometheus 스크레이핑 편의를 위해 열어둠).
+                        .requestMatchers("/actuator/**").permitAll()
+
                         // 2. 학부모 전용: 본인 자녀 목록 조회/추가/수정 (구체적인 규칙을 먼저 선언)
                         .requestMatchers("/api/members/my-children", "/api/members/my-children/**", "/api/members/my-children-academies").hasRole("PARENT")
 

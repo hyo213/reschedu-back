@@ -19,6 +19,8 @@ import com.academy.reschedu.domain.regularclass.RegularClassStudent;
 import com.academy.reschedu.domain.regularclass.RegularClassStudentRepository;
 import com.academy.reschedu.domain.regularclass.RegularClassTimeSlot;
 import com.academy.reschedu.global.security.CurrentMemberProvider;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -50,6 +52,7 @@ public class MakeupRequestService {
     private final StudentRepository studentRepository;
     private final CurrentMemberProvider currentMemberProvider;
     private final RedissonClient redissonClient;
+    private final MeterRegistry meterRegistry;
 
     private static final long SLOT_LOCK_WAIT_SECONDS = 3L;
     private static final long SLOT_LOCK_LEASE_SECONDS = 10L;
@@ -350,13 +353,18 @@ public class MakeupRequestService {
     private void acquireSlotLock(UUID regularClassUuid, LocalDate targetDate) {
         RLock lock = redissonClient.getLock("makeup-slot:" + regularClassUuid + ":" + targetDate);
         boolean acquired;
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             acquired = lock.tryLock(SLOT_LOCK_WAIT_SECONDS, SLOT_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("락 획득 중 인터럽트가 발생했습니다.", e);
+        } finally {
+            // 🎯 여러 요청이 같은 자리를 두고 경합할 때 실제로 얼마나 대기했는지 관찰하기 위한 지표.
+            sample.stop(meterRegistry.timer("makeup.slot.lock.wait"));
         }
         if (!acquired) {
+            meterRegistry.counter("makeup.slot.lock.failed").increment();
             throw new IllegalStateException("다른 요청이 같은 자리를 처리 중입니다. 잠시 후 다시 시도해주세요.");
         }
         releaseLockAfterCommit(lock);

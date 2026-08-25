@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # 평소엔 IntelliJ로 호스트에서 직접 앱을 띄워 개발하므로, 컨테이너 안에서 호스트를 가리키는
+  # host.docker.internal로 스크레이핑한다. docker-compose의 app 서비스로 완전히 컨테이너화해서
+  # 띄운 경우엔 이 값을 app:8080으로 바꾸면 된다.
+  - job_name: reschedu-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
