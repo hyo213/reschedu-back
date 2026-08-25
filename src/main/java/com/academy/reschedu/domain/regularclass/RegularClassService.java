@@ -74,26 +74,13 @@ public class RegularClassService {
     private final StudentRepository studentRepository;
     private final CurrentMemberProvider currentMemberProvider;
 
-    /**
-     * 정규 수업을 요일별로 등록한다. RegularClass는 요일 하나 + 시간 하나만 가지는 단일 슬롯이므로,
-     * 여러 요일을 한 번에 등록하면 요일별로 독립된 RegularClass가 각각 만들어진다. 같은 강사가 이미
-     * 같은 요일·시간에 진행 중인 수업이 있으면 새로 만들지 않고 그 수업에 학생을 합류시킨다.
-     *
-     * @return 배정된(합류 + 신규 생성 포함) 정규 수업 uuid 목록
-     */
+    /** 요일별로 정규 수업을 등록한다. 같은 강사의 동일 요일·시간 수업이 있으면 합류시키고, 없으면 새로 만든다. */
     @Transactional
     public List<UUID> createRegularClass(Long academyId, RegularClassCreateRequest request) {
         validateRequesterBelongsToAcademy(academyId);
 
-        Academy academy = academyRepository.findById(academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
-
-        Member teacher = memberRepository.findByUuid(request.teacherUuid())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 강사입니다."));
-
-        if (teacher.getRole() != MemberRole.TEACHER || !isSameAcademy(teacher.getAcademy(), academy)) {
-            throw new IllegalArgumentException("해당 학원 소속 강사만 담당 강사로 지정할 수 있습니다.");
-        }
+        Academy academy = getAcademyOrThrow(academyId);
+        Member teacher = getVerifiedTeacher(academy, request.teacherUuid());
 
         List<RegularClass> teacherClasses = regularClassRepository.findByAcademyIdAndTeacher_Uuid(academyId, request.teacherUuid());
 
@@ -124,7 +111,7 @@ public class RegularClassService {
         return resultUuids;
     }
 
-    /** teacherClasses 중 주어진 슬롯과 요일·시작·종료 시각이 정확히 일치하는 수업을 찾는다(없으면 null). */
+    /** teacherClasses 중 요일·시작·종료 시각이 슬롯과 정확히 일치하는 수업을 찾는다(없으면 null). */
     private RegularClass findMatchingClass(List<RegularClass> teacherClasses, TimeSlotRequest slot) {
         return teacherClasses.stream()
                 .filter(rc -> rc.getTimeSlotFor(slot.dayOfWeek())
@@ -144,18 +131,12 @@ public class RegularClassService {
         }
         Set<RegularClassTimeSlot> timeSlots = buildTimeSlots(request.timeSlots());
 
-        Academy academy = academyRepository.findById(academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
+        Academy academy = getAcademyOrThrow(academyId);
 
         RegularClass regularClass = regularClassRepository.findByUuidAndAcademyId(classUuid, academyId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 시간표입니다. uuid=" + classUuid));
 
-        Member teacher = memberRepository.findByUuid(request.teacherUuid())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 강사입니다."));
-
-        if (teacher.getRole() != MemberRole.TEACHER || !isSameAcademy(teacher.getAcademy(), academy)) {
-            throw new IllegalArgumentException("해당 학원 소속 강사만 담당 강사로 지정할 수 있습니다.");
-        }
+        Member teacher = getVerifiedTeacher(academy, request.teacherUuid());
 
         List<UUID> desired = request.studentUuids() != null ? request.studentUuids() : List.of();
         Set<UUID> desiredSet = new HashSet<>(desired);
@@ -205,9 +186,8 @@ public class RegularClassService {
     }
 
     /**
-     * 담당 강사 변경(효력일 지정). 기존 반(fromClass)은 그대로 두고, effectiveFrom부터 현재 로스터
-     * 전원을 새 강사의 같은 요일·시간 반으로 이관한다(없으면 새로 만든다). effectiveFrom 전날까지의
-     * 과거 기록은 fromClass에 그대로 남는다.
+     * 담당 강사 변경(효력일 지정). 기존 반은 그대로 두고, effectiveFrom부터 현재 로스터 전원을 새 강사의
+     * 같은 요일·시간 반으로 이관한다(없으면 새로 만든다). effectiveFrom 전날까지의 기록은 기존 반에 남는다.
      *
      * @return 이관된 학생들의 새 배정(정규 수업 uuid) 목록
      */
@@ -215,16 +195,9 @@ public class RegularClassService {
     public List<UUID> changeClassTeacher(Long academyId, UUID classUuid, ChangeClassTeacherRequest request) {
         validateRequesterBelongsToAcademy(academyId);
 
-        Academy academy = academyRepository.findById(academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
-        RegularClass fromClass = regularClassRepository.findByUuidAndAcademyId(classUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 시간표입니다."));
-        Member newTeacher = memberRepository.findByUuid(request.newTeacherUuid())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 강사입니다."));
-
-        if (newTeacher.getRole() != MemberRole.TEACHER || !isSameAcademy(newTeacher.getAcademy(), academy)) {
-            throw new IllegalArgumentException("해당 학원 소속 강사만 담당 강사로 지정할 수 있습니다.");
-        }
+        Academy academy = getAcademyOrThrow(academyId);
+        RegularClass fromClass = getRegularClassOrThrow(academyId, classUuid);
+        Member newTeacher = getVerifiedTeacher(academy, request.newTeacherUuid());
         if (newTeacher.getId().equals(fromClass.getTeacher().getId())) {
             throw new IllegalArgumentException("이미 담당 중인 강사입니다.");
         }
@@ -256,8 +229,7 @@ public class RegularClassService {
                     academyStudent.getStudent().getUuid(), toClass.getUuid(), request.effectiveFrom(), null));
             resultUuids.add(assigned);
 
-            // [수강생 관리] 담당 강사는 지금 즉시 새 강사로 바뀌고, 기존 강사는 effectiveFrom 전날까지는
-            // previousTeacher로 남아 목록에 계속 보인다.
+            // [수강생 관리] 담당 강사는 즉시 바뀌고, 기존 강사는 effectiveFrom 전날까지 previousTeacher로 목록에 남는다.
             if (academyStudent.getTeacher() != null && academyStudent.getTeacher().getId().equals(fromClass.getTeacher().getId())) {
                 academyStudent.scheduleTeacherHandover(academyStudent.getTeacher(), newTeacher, request.effectiveFrom());
             }
@@ -268,13 +240,12 @@ public class RegularClassService {
 
     /**
      * 반 종료(효력일 지정). effectiveFrom부터 이 반을 더 이상 진행하지 않고, 배정된 학생들의 로스터도
-     * effectiveFrom 전날로 종료 처리한다(다른 반으로 자동 이관하지 않는다). 그 이전 기록은 그대로 남는다.
+     * effectiveFrom 전날로 종료 처리한다(다른 반으로 자동 이관하지 않는다).
      */
     @Transactional
     public void discontinueRegularClass(Long academyId, UUID classUuid, RegularClassDiscontinueRequest request) {
         validateRequesterBelongsToAcademy(academyId);
-        RegularClass regularClass = regularClassRepository.findByUuidAndAcademyId(classUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 시간표입니다."));
+        RegularClass regularClass = getRegularClassOrThrow(academyId, classUuid);
 
         LocalDate endDate = request.effectiveFrom().minusDays(1);
         List<RegularClassStudent> openEnrollments = regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).stream()
@@ -295,14 +266,11 @@ public class RegularClassService {
         regularClass.discontinue(request.effectiveFrom());
     }
 
-    /**
-     * 반 완전 삭제. 학생 배정/보강권/보강 신청 이력이 하나라도 있으면 거부한다(그 경우 discontinueRegularClass 사용).
-     */
+    /** 반 완전 삭제. 학생 배정/보강권/보강 신청 이력이 하나라도 있으면 거부한다(그 경우 discontinueRegularClass 사용). */
     @Transactional
     public void deleteRegularClass(Long academyId, UUID classUuid) {
         validateRequesterBelongsToAcademy(academyId);
-        RegularClass regularClass = regularClassRepository.findByUuidAndAcademyId(classUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 시간표입니다."));
+        RegularClass regularClass = getRegularClassOrThrow(academyId, classUuid);
 
         if (!regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).isEmpty()) {
             throw new IllegalStateException("학생이 배정된 적 있는 반은 완전히 삭제할 수 없습니다. [반 종료]를 이용해주세요.");
@@ -334,11 +302,32 @@ public class RegularClassService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    /**
-     * 요일별 시간대 입력을 검증하고 엔티티가 저장할 값 객체 집합으로 변환한다.
-     * 요일마다 서로 다른 시간을 가질 수 있지만, 같은 요일이 두 번 입력되면 어느 쪽을 따라야 할지
-     * 모호해지므로 요일 중복은 허용하지 않는다.
-     */
+    private Academy getAcademyOrThrow(Long academyId) {
+        return academyRepository.findById(academyId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
+    }
+
+    private RegularClass getRegularClassOrThrow(Long academyId, UUID classUuid) {
+        return regularClassRepository.findByUuidAndAcademyId(classUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 시간표입니다."));
+    }
+
+    private AcademyStudent getAcademyStudentOrThrow(Long academyId, UUID studentUuid) {
+        return academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+    }
+
+    /** teacherUuid가 해당 학원 소속 강사인지 검증하고 반환한다. */
+    private Member getVerifiedTeacher(Academy academy, UUID teacherUuid) {
+        Member teacher = memberRepository.findByUuid(teacherUuid)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 강사입니다."));
+        if (teacher.getRole() != MemberRole.TEACHER || !isSameAcademy(teacher.getAcademy(), academy)) {
+            throw new IllegalArgumentException("해당 학원 소속 강사만 담당 강사로 지정할 수 있습니다.");
+        }
+        return teacher;
+    }
+
+    /** 요일 중복 없이 각 슬롯의 시작<종료 시각을 검증하고 값 객체 집합으로 변환한다. */
     private Set<RegularClassTimeSlot> buildTimeSlots(List<TimeSlotRequest> requests) {
         Set<DayOfWeek> seenDays = new HashSet<>();
         Set<RegularClassTimeSlot> timeSlots = new LinkedHashSet<>();
@@ -364,7 +353,7 @@ public class RegularClassService {
             throw new IllegalStateException("가입 승인이 완료되지 않은 수강생은 시간표에 등록할 수 없습니다. (" + academyStudent.getStudent().getName() + ")");
         }
 
-        // 지금부터 무기한 배정하므로, 이미 완전히 종료된 과거 이력과는 겹쳐도 되지만 아직 끝나지 않은 배정과는 겹치면 안 된다.
+        // 완전히 종료된 과거 이력과는 겹쳐도 되지만, 아직 끝나지 않은 배정과는 겹치면 안 된다.
         LocalDate today = LocalDate.now();
         boolean hasUnterminatedConflict = regularClassStudentRepository.findByAcademyStudent_IdOrderByStartDateDesc(academyStudent.getId()).stream()
                 .filter(rcs -> rcs.getRegularClass().getId().equals(regularClass.getId()))
@@ -385,8 +374,6 @@ public class RegularClassService {
 
         RegularClassStudent enrollment = new RegularClassStudent(regularClass, academyStudent);
         regularClassStudentRepository.save(enrollment);
-
-        // 이미 생성된 회차에도 이 학생을 소급 반영하고, 휴무 확정 회차면 보강권도 발급한다.
         syncStudentAcrossSessions(enrollment);
     }
 
@@ -397,10 +384,7 @@ public class RegularClassService {
                 .count();
     }
 
-    /**
-     * 이 반에 배정 이력이 있었던 가장 이른 시작일. 배정 이력이 전혀 없으면(신규 반) LocalDate.MIN을
-     * 반환해 "항상 시작된 것"으로 취급한다 — 담당 강사 인계 대기 중인 반과 갓 만든 빈 반을 구분하는 기준.
-     */
+    /** 이 반의 가장 이른 배정 시작일. 배정 이력이 없으면(신규 반) LocalDate.MIN — "항상 시작된 것"으로 취급. */
     private LocalDate computeEarliestStart(RegularClass regularClass) {
         return regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).stream()
                 .map(rcs -> rcs.getStartDate() == null ? LocalDate.MIN : rcs.getStartDate())
@@ -412,26 +396,20 @@ public class RegularClassService {
     // 날짜별 개별 스케줄 인스턴스(RegularClassSession) 관리
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * 이미 생성된 회차라면 그대로 반환하고, 없다면 그 시점의 템플릿 로스터·정원·휴무 상태를 스냅샷해
-     * 새로 생성한다. 조회(주간 시간표 보기) 경로에서 사용한다.
-     */
+    /** 이미 생성된 회차면 그대로, 없으면 그 시점의 템플릿 로스터·정원·휴무 상태를 스냅샷해 생성한다. */
     private RegularClassSession ensureSession(RegularClass regularClass, LocalDate date) {
         return syncSessionForDate(regularClass, date).session();
     }
 
-    /**
-     * 🎯 [MakeupRequestService 전용] 보강 신청 생성/수락 시, 신청 대상 회차를 (없으면 생성하며) 확보한다.
-     * ensureSession과 동일하지만 다른 패키지(makeup)에서 호출할 수 있도록 공개된 진입점이다.
-     */
+    /** MakeupRequestService 전용 진입점: 보강 신청 생성/수락 시 대상 회차를 (없으면 생성하며) 확보한다. */
     @Transactional
     public RegularClassSession ensureSessionForMakeupBooking(RegularClass regularClass, LocalDate date) {
         return ensureSession(regularClass, date);
     }
 
     /**
-     * 학원 휴무일이 등록될 때 호출된다. 그 요일에 해당하는 모든 정규 수업에 대해 회차를 확보하고
-     * (없으면 생성, 있으면 휴무로 갱신) 각 회차의 로스터 전원에게 보강권을 발급한다.
+     * 학원 휴무일 등록 시 호출. 그 요일의 모든 정규 수업에 대해 회차를 확보(생성/휴무 갱신)하고
+     * 각 회차 로스터 전원에게 보강권을 발급한다.
      *
      * @return 이번 호출로 새로 발급된 보강권 개수
      */
@@ -449,11 +427,10 @@ public class RegularClassService {
     }
 
     /**
-     * 🎯 학원 휴무일 지정이 취소(삭제)될 때 호출된다. 그 요일에 해당하는 모든 정규 수업의 회차를
-     * 원래의 정규 수업 상태로 복원하고(holidayCancelled=false), 휴무로 인해 발급되었던 "미사용"
-     * 보강권만 정확히 찾아 회수한다(이미 사용된 티켓은 건드리지 않는다).
+     * 학원 휴무일 지정이 취소될 때 호출. 그 요일의 모든 회차를 정규 상태로 복원하고, 휴무로 발급된
+     * "미사용" 보강권만 회수한다(이미 사용된 티켓은 건드리지 않는다).
      *
-     * @return 이번 호출로 실제로 회수된 보강권 개수
+     * @return 실제로 회수된 보강권 개수
      */
     @Transactional
     public int revertHolidayForSessions(Academy academy, LocalDate date) {
@@ -466,7 +443,7 @@ public class RegularClassService {
             Optional<RegularClassSession> sessionOpt =
                     regularClassSessionRepository.findByRegularClass_IdAndDate(regularClass.getId(), date);
             if (sessionOpt.isEmpty() || !sessionOpt.get().isHolidayCancelled()) {
-                continue; // 아직 조회된 적 없거나(회차 미생성) 이미 정상 상태인 회차는 되돌릴 게 없다.
+                continue; // 회차 미생성이거나 이미 정상 상태면 되돌릴 게 없다.
             }
 
             RegularClassSession session = sessionOpt.get();
@@ -482,8 +459,8 @@ public class RegularClassService {
     }
 
     /**
-     * 세션을 (없으면 생성하며) 최신 휴무 상태로 맞추고, 이번 호출로 새로 확정된 휴무 상태라면
-     * 그 회차 로스터 전원에게 보강권을 발급한다. 조회 경로와 휴무일 등록 경로가 공유하는 핵심 로직이다.
+     * 세션을 (없으면 생성하며) 최신 휴무 상태로 맞추고, 이번 호출로 새로 확정된 휴무라면 로스터
+     * 전원에게 보강권을 발급한다. 조회 경로와 휴무일 등록 경로가 공유하는 핵심 로직.
      */
     private SessionSyncResult syncSessionForDate(RegularClass regularClass, LocalDate date) {
         boolean holidayExists = academyHolidayRepository.existsByAcademyIdAndDate(regularClass.getAcademy().getId(), date);
@@ -525,7 +502,7 @@ public class RegularClassService {
             return new SessionSyncResult(session, 0);
         }
 
-        // 🎯 이미 생성되어 있던 회차가 "뒤늦게" 휴무일로 지정된 경우 — 지금 확정하고 즉시 발급한다.
+        // 이미 생성된 회차가 뒤늦게 휴무일로 지정된 경우 — 지금 확정하고 즉시 발급한다.
         session.markHolidayCancelled();
         int issuedCount = 0;
         for (RegularClassSessionStudent rcss : regularClassSessionStudentRepository.findBySession_Id(session.getId())) {
@@ -540,10 +517,9 @@ public class RegularClassService {
     }
 
     /**
-     * 🎯 성능 최적화: 한 주(week) 안의 특정 정규 수업의 여러 후보 날짜에 대해 회차를 확보할 때, 날짜마다
-     * 개별적으로 조회하던 "휴무일 존재 여부"·"세션 존재 여부"를 이 주 범위 전체에 대해 한 번씩만 벌크
-     * 조회한 뒤 재사용한다. 세션이 아예 없거나(최초 조회) 뒤늦게 휴무로 확정된 날짜만 실제로
-     * syncSessionForDate(생성/갱신+보강권 발급)를 호출한다 — 그 외에는 순수 조회만으로 끝난다.
+     * 한 주 안의 후보 날짜들에 대해 회차를 확보할 때, 날짜별 휴무일 존재 여부와 세션 존재 여부를
+     * 주 범위 전체에서 한 번씩만 벌크 조회해 재사용한다. 세션이 없거나 뒤늦게 휴무로 확정된
+     * 날짜만 실제로 syncSessionForDate를 호출하고, 나머지는 조회만으로 끝난다.
      */
     private Map<LocalDate, RegularClassSession> ensureSessionsForWeek(
             RegularClass regularClass, LocalDate weekStart, LocalDate weekEnd, List<LocalDate> candidateDates) {
@@ -565,10 +541,8 @@ public class RegularClassService {
     }
 
     /**
-     * 한 학생이 새로 이 정규 수업 로스터에 편성되었을 때, 이미 생성되어 있는 모든 회차에 대해
-     * "이 날짜에 이 학생이 유효한가"를 다시 판단해 세션 로스터를 맞춘다.
-     * 이미 휴무로 확정된 회차라면 그 자리에서 바로 보강권을 발급한다 — 요구사항 2가 명시한
-     * "휴무일이 먼저 지정된 이후 수강 기간이 유효한 수강생이 뒤늦게 등록/포함되는" 시나리오를 해결한다.
+     * 학생이 새로 로스터에 편성됐을 때, 이미 생성된 모든 회차에 대해 "이 날짜에 유효한가"를 다시
+     * 판단해 세션 로스터를 맞춘다. 이미 휴무로 확정된 회차라면 그 자리에서 보강권을 발급한다.
      */
     private void syncStudentAcrossSessions(RegularClassStudent enrollment) {
         RegularClass regularClass = enrollment.getRegularClass();
@@ -589,11 +563,7 @@ public class RegularClassService {
         }
     }
 
-    /**
-     * 🎯 [수강생 관리] 화면에서 수강 기간이 등록/변경될 때 호출된다. 이 학생이 편성되어 있는
-     * 모든 정규 수업에 대해 이미 생성된 회차들을 다시 동기화한다(기간 연장으로 새로 포함되거나,
-     * 기간 단축으로 더 이상 해당되지 않게 되는 경우 모두 반영).
-     */
+    /** 수강 기간 변경 시, 이 학생이 편성된 모든 정규 수업의 기존 회차를 다시 동기화한다. */
     @Transactional
     public void syncSessionsForStudentPeriodChange(AcademyStudent academyStudent) {
         for (RegularClassStudent enrollment : regularClassStudentRepository.findByAcademyStudent_Id(academyStudent.getId())) {
@@ -602,23 +572,20 @@ public class RegularClassService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 🎯 [수강생 관리] 기간별 요일 변경 / 수강 히스토리
+    // [수강생 관리] 기간별 요일 변경 / 수강 히스토리
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * 🎯 [수강생 관리] 특정 학생을 정규 수업에 기간을 지정해 배정한다.
-     * [시간표 관리] 화면의 "체크박스 전체 교체" 플로우(enrollStudent)와 달리, 같은 반에 이미 종료된
-     * 배정 이력이 있어도 기간이 겹치지만 않으면 새로 추가할 수 있다 — 이 이력 자체가 수강 히스토리의
-     * 데이터 소스가 된다.
+     * 학생을 정규 수업에 기간을 지정해 배정한다. [시간표 관리]의 체크박스 전체 교체(enrollStudent)와
+     * 달리, 같은 반이라도 기간이 겹치지 않으면 종료된 이력 위에 새로 추가할 수 있다 — 이 이력이
+     * 수강 히스토리의 데이터 소스가 된다.
      */
     @Transactional
     public UUID assignStudentSchedule(Long academyId, ScheduleAssignmentRequest request) {
         validateRequesterBelongsToAcademy(academyId);
 
-        RegularClass regularClass = regularClassRepository.findByUuidAndAcademyId(request.regularClassUuid(), academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 시간표입니다."));
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(request.studentUuid(), academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        RegularClass regularClass = getRegularClassOrThrow(academyId, request.regularClassUuid());
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(academyId, request.studentUuid());
 
         if (!academyStudent.isApproved()) {
             throw new IllegalStateException("가입 승인이 완료되지 않은 수강생은 시간표에 등록할 수 없습니다.");
@@ -627,7 +594,7 @@ public class RegularClassService {
             throw new IllegalArgumentException("종료일은 시작일보다 이후여야 합니다.");
         }
 
-        // 🚨 같은 반에 겹치는 기간으로 중복 배정되지 않도록 검증한다(DB 유니크 제약 대신 서비스 계층에서 처리).
+        // 같은 반에 겹치는 기간으로 중복 배정되지 않도록 검증한다(DB 유니크 제약 대신 서비스 계층에서 처리).
         boolean overlaps = regularClassStudentRepository.findByAcademyStudent_IdOrderByStartDateDesc(academyStudent.getId()).stream()
                 .filter(rcs -> rcs.getRegularClass().getId().equals(regularClass.getId()))
                 .anyMatch(rcs -> periodsOverlap(rcs.getStartDate(), rcs.getEndDate(), request.startDate(), request.endDate()));
@@ -654,16 +621,12 @@ public class RegularClassService {
         return regularClass.getUuid();
     }
 
-    /**
-     * 🎯 [수강생 관리] 요일 변경: 기존 반 배정을 특정 날짜로 종료하고, 동시에 새 반으로 배정을 시작한다.
-     * 예: 8월까지 월수금반이던 학생을 9월 1일부터 월목반으로 옮길 때 한 번의 호출로 원자적으로 처리한다.
-     */
+    /** 요일 변경: 기존 반 배정을 특정 날짜로 종료하고 동시에 새 반으로 배정을 시작한다(원자적 처리). */
     @Transactional
     public void changeStudentSchedule(Long academyId, ScheduleChangeRequest request) {
         validateRequesterBelongsToAcademy(academyId);
 
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(request.studentUuid(), academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(academyId, request.studentUuid());
 
         if (request.fromRegularClassUuid() != null) {
             RegularClass fromClass = regularClassRepository.findByUuidAndAcademyId(request.fromRegularClassUuid(), academyId)
@@ -675,10 +638,7 @@ public class RegularClassService {
                 request.studentUuid(), request.toRegularClassUuid(), request.effectiveFrom(), null));
     }
 
-    /**
-     * 특정 반에 대한 학생의 현재 배정(endDate == null인 행, 미래 시작 배정 포함)을 주어진 날짜로 종료
-     * 처리하고 세션 로스터를 재동기화한다.
-     */
+    /** 이 반에 대한 학생의 현재 배정(endDate == null, 미래 시작 포함)을 주어진 날짜로 종료 처리한다. */
     private void endActiveEnrollment(AcademyStudent academyStudent, RegularClass regularClass, LocalDate endDate) {
         RegularClassStudent activeEnrollment = regularClassStudentRepository.findByAcademyStudent_IdOrderByStartDateDesc(academyStudent.getId()).stream()
                 .filter(rcs -> rcs.getRegularClass().getId().equals(regularClass.getId()) && rcs.getEndDate() == null)
@@ -698,25 +658,18 @@ public class RegularClassService {
     }
 
     /**
-     * 스마트 반 배정: 요청한 요일·시간마다, 같은 강사가 이미 정확히 같은 요일·시간으로 진행 중인 반이
-     * 있으면 합류시키고 없으면 새로 만든다. fromRegularClassUuid가 있으면(요일 변경) 기존 배정을
-     * effectiveFrom 전날로 먼저 종료 처리한다.
+     * 스마트 반 배정: 요일·시간마다 같은 강사의 동일 요일·시간 반이 있으면 합류, 없으면 새로 만든다.
+     * fromRegularClassUuid가 있으면(요일 변경) 기존 배정을 effectiveFrom 전날로 먼저 종료 처리한다.
      *
-     * @return 이번에 배정된(기존 반 합류 + 신규 반 생성 포함) 정규 수업 uuid 목록
+     * @return 이번에 배정된(합류 + 신규 생성 포함) 정규 수업 uuid 목록
      */
     @Transactional
     public List<UUID> smartAssignStudentSchedule(Long academyId, SmartScheduleAssignmentRequest request) {
         validateRequesterBelongsToAcademy(academyId);
 
-        Academy academy = academyRepository.findById(academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
-        Member teacher = memberRepository.findByUuid(request.teacherUuid())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 강사입니다."));
-        if (teacher.getRole() != MemberRole.TEACHER || !isSameAcademy(teacher.getAcademy(), academy)) {
-            throw new IllegalArgumentException("해당 학원 소속 강사만 담당 강사로 지정할 수 있습니다.");
-        }
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(request.studentUuid(), academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        Academy academy = getAcademyOrThrow(academyId);
+        Member teacher = getVerifiedTeacher(academy, request.teacherUuid());
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(academyId, request.studentUuid());
 
         if (request.fromRegularClassUuid() != null) {
             RegularClass fromClass = regularClassRepository.findByUuidAndAcademyId(request.fromRegularClassUuid(), academyId)
@@ -724,7 +677,6 @@ public class RegularClassService {
             endActiveEnrollment(academyStudent, fromClass, request.effectiveFrom().minusDays(1));
         }
 
-        // 🎯 이 강사가 이미 진행 중인 반들 중, 요일+시작+종료 시각이 정확히 일치하는 슬롯을 찾아 매칭한다.
         List<RegularClass> teacherClasses = regularClassRepository.findByAcademyIdAndTeacher_Uuid(academyId, request.teacherUuid());
 
         List<UUID> resultUuids = new ArrayList<>();
@@ -735,7 +687,6 @@ public class RegularClassService {
             if (matched != null) {
                 regularClassUuid = matched.getUuid();
             } else {
-                // 🎯 이 요일·시간만의 새 반 하나를 만든다 — 다른 요일과는 완전히 독립된 별개의 RegularClass다.
                 List<UUID> created = createRegularClass(academyId, new RegularClassCreateRequest(
                         request.title(), request.teacherUuid(), request.roomNumber(), request.maxCapacity(), List.of(slot), List.of()));
                 regularClassUuid = created.get(0);
@@ -750,24 +701,17 @@ public class RegularClassService {
         return resultUuids;
     }
 
-    /**
-     * 🎯 [수강 히스토리] 특정 학생이 과거~현재~예정으로 어떤 반에 어떤 기간 배정되어 있었는지 전체
-     * 이력을 최신순으로 반환한다.
-     */
+    /** 학생이 과거~현재~예정으로 어떤 반에 어떤 기간 배정되어 있었는지 전체 이력을 최신순으로 반환한다. */
     public List<ScheduleHistoryResponse> getStudentScheduleHistory(Long academyId, UUID studentUuid) {
         validateRequesterBelongsToAcademy(academyId);
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(academyId, studentUuid);
 
         return regularClassStudentRepository.findByAcademyStudent_IdOrderByStartDateDesc(academyStudent.getId()).stream()
                 .map(ScheduleHistoryResponse::from)
                 .toList();
     }
 
-    /**
-     * 🎯 [수강생 목록] 화면 전용: 여러 학생의 "오늘 기준 활성" 반 배정을 한 번의 벌크 조회로 가져와
-     * academyStudentId별로 묶어 반환한다(학생 수만큼 반복 조회하는 N+1을 피하기 위함).
-     */
+    /** [수강생 목록] 전용: 여러 학생의 오늘 기준 활성 반 배정을 한 번의 벌크 조회로 가져와 학생별로 묶는다(N+1 방지). */
     public Map<Long, List<ScheduleSummary>> getActiveScheduleSummaries(Collection<Long> academyStudentIds) {
         if (academyStudentIds.isEmpty()) {
             return Map.of();
@@ -783,7 +727,7 @@ public class RegularClassService {
                 ));
     }
 
-    /** 두 기간이 겹치는지 여부. null은 "그 방향으로 무제한"을 의미한다. */
+    /** 두 기간이 겹치는지 여부. null은 그 방향으로 무제한을 의미한다. */
     private boolean periodsOverlap(LocalDate aStart, LocalDate aEnd, LocalDate bStart, LocalDate bEnd) {
         boolean aStartsBeforeBEnds = bEnd == null || aStart == null || !aStart.isAfter(bEnd);
         boolean bStartsBeforeAEnds = aEnd == null || bStart == null || !bStart.isAfter(aEnd);
@@ -797,15 +741,13 @@ public class RegularClassService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 🎯 조회
+    // 조회
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * @param weekReferenceDate 이 날짜가 속한 주(월~일)의 회차 정보를 함께 반환한다. null이면 기본 시간표 정보만 반환.
      */
-    // 🚨 조회 API이지만 weekReferenceDate가 주어지면 내부적으로 회차(RegularClassSession)를 생성할 수 있어
-    // 클래스 레벨의 @Transactional(readOnly = true)를 명시적으로 덮어써야 한다. 그렇지 않으면
-    // "cannot execute INSERT in a read-only transaction" 오류가 발생한다.
+    // weekReferenceDate가 주어지면 회차(RegularClassSession)를 생성할 수 있어 클래스 기본값(readOnly)을 덮어쓴다.
     @Transactional
     public List<RegularClassResponse> getRegularClasses(Long academyId, UUID teacherUuid, LocalDate weekReferenceDate) {
         Member requester = validateRequesterBelongsToAcademy(academyId);
@@ -819,11 +761,7 @@ public class RegularClassService {
                 .toList();
     }
 
-    /**
-     * 🎯 학부모 전용 조회: JWT로 인증된 본인 신원을 기준으로, 본인 자녀가 편성된 시간표만 반환한다.
-     * academyId 등 클라이언트가 임의로 바꿀 수 있는 파라미터에 의존하지 않는다.
-     */
-    // 🚨 getRegularClasses와 동일한 이유로 write 트랜잭션이 필요하다(회차 생성 가능성).
+    /** 학부모 전용 조회: JWT로 인증된 본인 신원 기준으로 본인 자녀가 편성된 시간표만 반환한다. */
     @Transactional
     public List<RegularClassResponse> getMyChildrenRegularClasses(LocalDate weekReferenceDate) {
         Member parent = currentMemberProvider.getCurrentMember();
@@ -846,15 +784,14 @@ public class RegularClassService {
     }
 
     private RegularClassResponse toResponseWithRoster(RegularClass regularClass, LocalDate weekReferenceDate, Member requester) {
-        // 🚨 [기간별 요일 변경 지원] 과거에 종료됐거나 아직 시작 전인 배정 이력은 "현재 명단"에 노출하지 않는다.
+        // 과거 종료됐거나 아직 시작 전인 배정 이력은 "현재 명단"에 노출하지 않는다.
         List<RegularClassStudent> rosterEntities = regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).stream()
                 .filter(rcs -> rcs.isActiveOn(LocalDate.now()))
                 .toList();
         List<RosterStudentResponse> roster = restrictToOwnChildrenIfParent(rosterEntities.stream()
                 .map(rcs -> RosterStudentResponse.from(rcs.getAcademyStudent()))
                 .toList(), requester);
-        // 🎯 "현재 인원"은 오늘 기준으로 수강 기간이 유효한 인원만 센다(만료/미개시 학생 제외).
-        // 🚨 이 숫자는 학생 신원을 특정하지 않는 집계값이므로 학부모에게도 그대로(필터링 없이) 노출해도 안전하다.
+        // 현재 인원은 오늘 기준 수강 기간이 유효한 인원만 센다. 신원을 특정하지 않는 집계값이라 학부모에게도 그대로 노출한다.
         int currentCount = (int) rosterEntities.stream()
                 .filter(rcs -> rcs.getAcademyStudent().isActiveOn(LocalDate.now()))
                 .count();
@@ -862,10 +799,7 @@ public class RegularClassService {
         return RegularClassResponse.of(regularClass, roster, currentCount, weeklyOccurrences);
     }
 
-    /**
-     * 🚨 [학부모 정보 노출 차단] 요청자가 학부모(PARENT)면 명단을 본인 자녀로만 제한한다.
-     * 원장/강사 요청은 그대로(전체 명단) 반환한다.
-     */
+    /** 요청자가 학부모면 명단을 본인 자녀로만 제한한다. 원장/강사는 전체 명단을 그대로 반환한다. */
     private List<RosterStudentResponse> restrictToOwnChildrenIfParent(List<RosterStudentResponse> students, Member requester) {
         if (requester.getRole() != MemberRole.PARENT) {
             return students;
@@ -877,10 +811,9 @@ public class RegularClassService {
     }
 
     /**
-     * weekReferenceDate가 속한 주(월요일~일요일) 중, 이 수업의 정규 요일과 겹치는 날짜마다 회차를
-     * 확보(ensureSession)하고, 그 회차의 실제 로스터 스냅샷을 기준으로 응답을 만든다.
-     * 휴무가 아니면서 참여 가능한 유효 수강생이 한 명도 없는 회차는 응답에서 제외한다
-     * (시간표 화면에 "정원 0/N" 빈 블록이 뜨지 않도록).
+     * weekReferenceDate가 속한 주(월~일) 중 이 수업의 정규 요일과 겹치는 날짜마다 회차를 확보하고,
+     * 그 회차의 실제 로스터 스냅샷을 기준으로 응답을 만든다. 휴무가 아니면서 유효 수강생이 한 명도
+     * 없는 회차는 응답에서 제외한다(빈 블록 방지).
      */
     private List<WeeklyOccurrenceResponse> computeWeeklyOccurrences(RegularClass regularClass, LocalDate weekReferenceDate, Member requester) {
         if (weekReferenceDate == null) {
@@ -893,7 +826,7 @@ public class RegularClassService {
         List<LocalDate> candidateDates = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
             LocalDate date = monday.plusDays(i);
-            // 🚨 [반 종료] 종료 효력일 이후는 로스터가 있었더라도(과거 기록) 더 이상 보여줄 회차가 아니다.
+            // 반 종료 효력일 이후는 과거 로스터가 있었더라도 더 이상 보여줄 회차가 아니다.
             if (regularClass.getDaysOfWeek().contains(date.getDayOfWeek()) && !regularClass.isDiscontinuedOn(date)) {
                 candidateDates.add(date);
             }
@@ -902,7 +835,7 @@ public class RegularClassService {
             return List.of();
         }
 
-        // 🚨 학부모 요청이면 결석자 명단을 본인 자녀로만 제한해야 하므로 미리 자녀 uuid 집합을 구해 둔다.
+        // 학부모 요청이면 결석자 명단을 본인 자녀로만 제한해야 하므로 미리 자녀 uuid 집합을 구해 둔다.
         boolean isParent = requester.getRole() == MemberRole.PARENT;
         Set<UUID> myChildrenUuids = isParent
                 ? studentRepository.findByParentId(requester.getId()).stream().map(Student::getUuid).collect(Collectors.toSet())
@@ -910,7 +843,7 @@ public class RegularClassService {
 
         LocalDate earliestStart = computeEarliestStart(regularClass);
 
-        // 🎯 세션 확보·로스터·결석 티켓을 이 주(week) 범위 전체에 대해 벌크 조회한다.
+        // 세션 확보·로스터·결석 티켓을 이 주 범위 전체에 대해 벌크 조회한다.
         Map<LocalDate, RegularClassSession> sessionsByDate = ensureSessionsForWeek(regularClass, monday, sunday, candidateDates);
 
         List<Long> sessionIds = sessionsByDate.values().stream().map(RegularClassSession::getId).toList();
@@ -937,12 +870,12 @@ public class RegularClassService {
                     .map(RosterStudentResponse::from)
                     .toList();
 
-            // 🚨 [학부모 정보 노출 차단] 실제 응답에 담을 출석 명단은 역할에 따라 제한한다.
+            // 출석 명단도 학부모는 본인 자녀로만 제한한다.
             List<RosterStudentResponse> visibleAttendingStudents = isParent
                     ? allAttendingStudents.stream().filter(s -> myChildrenUuids.contains(s.uuid())).toList()
                     : allAttendingStudents;
 
-            // 🚨 결석자 식별 정보는 원장/강사에게만(전체), 학부모에게는 본인 자녀 결석분만 노출한다.
+            // 결석자 식별 정보는 원장/강사에게 전체, 학부모에게는 본인 자녀 결석분만 노출한다.
             List<RosterStudentResponse> absentStudents = List.of();
             List<RosterStudentResponse> myAbsentStudents = List.of();
             if (!absentStudentUuids.isEmpty()) {
@@ -966,16 +899,12 @@ public class RegularClassService {
         return occurrences;
     }
 
-    /**
-     * 🎯 보강 신청 화면용: 지정한 주(월~일) 중 "오늘 이후"이면서 아직 정원이 차지 않은 모든 정규 수업의
-     * 여석을 academy 전체에서 찾아 반환한다. 휴무로 취소된 회차는 제외한다.
-     */
-    // 🚨 조회 API지만 세션을 새로 생성할 수 있어(ensureSession) write 트랜잭션이 필요하다.
+    /** 보강 신청 화면용: 지정한 주(월~일) 중 오늘 이후이면서 정원이 차지 않은 여석을 학원 전체에서 찾는다. 휴무 회차는 제외. */
+    // 세션을 새로 생성할 수 있어(ensureSession) write 트랜잭션이 필요하다.
     @Transactional
     public List<MakeupSlotResponse> getOpenMakeupSlots(Long academyId, LocalDate weekReferenceDate) {
         Member requester = validateReaderCanAccessAcademy(academyId);
-        // 🚨 [권한별 표시 차등화] 학부모는 강의 정보(수업명/시간/여석)만 필요하므로 강사명·매칭된 학생
-        // 명단을 노출하지 않는다. 원장/강사는 매칭 판단을 위해 둘 다 그대로 봐야 한다.
+        // 학부모는 강의 정보(수업명/시간/여석)만 필요해 강사명·매칭된 학생 명단은 노출하지 않는다.
         boolean isParent = requester.getRole() == MemberRole.PARENT;
 
         LocalDate monday = weekReferenceDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
@@ -984,8 +913,7 @@ public class RegularClassService {
         List<MakeupSlotResponse> slots = new ArrayList<>();
         for (RegularClass regularClass : regularClassRepository.findByAcademyId(academyId)) {
             List<LocalDate> candidateDates = new ArrayList<>();
-            // 🎯 지난 수업도 표시한다 — 이미 결석/보강 처리를 놓친 경우 사후에도 매칭 처리할 수 있어야 한다.
-            // 🚨 [반 종료] 종료 효력일 이후는 여석 대상에서 제외한다.
+            // 지난 수업도 표시한다 — 결석/보강 처리를 놓친 경우 사후에도 매칭할 수 있어야 한다. 반 종료 이후는 제외.
             for (int i = 0; i < 7; i++) {
                 LocalDate date = monday.plusDays(i);
                 if (regularClass.getDaysOfWeek().contains(date.getDayOfWeek()) && !regularClass.isDiscontinuedOn(date)) {
@@ -997,8 +925,6 @@ public class RegularClassService {
             }
 
             LocalDate earliestStart = computeEarliestStart(regularClass);
-
-            // 🎯 클래스마다 날짜별 세션/로스터 카운트를 벌크 조회한다.
             Map<LocalDate, RegularClassSession> sessionsByDate = ensureSessionsForWeek(regularClass, monday, sunday, candidateDates);
 
             List<Long> sessionIds = sessionsByDate.values().stream().map(RegularClassSession::getId).toList();
@@ -1053,14 +979,11 @@ public class RegularClassService {
         return slots;
     }
 
-    /** "다음 수업" 탐색 시 며칠 앞까지 내다볼지 (모든 요일 조합을 커버하기에 충분한 여유값). */
+    /** "다음 수업" 탐색 시 며칠 앞까지 내다볼지(모든 요일 조합을 커버하기에 충분한 여유값). */
     private static final int NEXT_CLASS_LOOKAHEAD_DAYS = 30;
 
-    /**
-     * 🎯 원장/강사 대시보드용: 현재 시각 기준으로 가장 가까운 다가오는 시간표 회차를 계산한다.
-     * teacherUuid가 없으면(원장) 학원 전체 시간표 중에서, 있으면(강사) 본인 담당 시간표 중에서 찾는다.
-     */
-    // 🚨 findNextOccurrence가 후보 날짜의 회차를 생성할 수 있어 write 트랜잭션이 필요하다.
+    /** 원장/강사 대시보드용: 현재 시각 기준 가장 가까운 다가오는 회차. teacherUuid 없으면 학원 전체, 있으면 담당분만. */
+    // findNextOccurrence가 후보 날짜의 회차를 생성할 수 있어 write 트랜잭션이 필요하다.
     @Transactional
     public Optional<NextClassResponse> getNextClass(Long academyId, UUID teacherUuid) {
         validateRequesterBelongsToAcademy(academyId);
@@ -1072,10 +995,7 @@ public class RegularClassService {
         return findNextOccurrence(candidates);
     }
 
-    /**
-     * 🎯 학부모 대시보드용: 본인 자녀가 편성된 시간표 중 가장 가까운 다가오는 회차를 계산한다.
-     */
-    // 🚨 getNextClass와 동일한 이유로 write 트랜잭션이 필요하다.
+    /** 학부모 대시보드용: 본인 자녀가 편성된 시간표 중 가장 가까운 다가오는 회차. */
     @Transactional
     public Optional<NextClassResponse> getNextClassForMyChildren() {
         Member parent = currentMemberProvider.getCurrentMember();
@@ -1094,10 +1014,7 @@ public class RegularClassService {
         return findNextOccurrence(new ArrayList<>(distinctClasses.values()));
     }
 
-    /**
-     * 후보 시간표들 중, 지금 이 순간 이후로 가장 이르게 시작하는 "실제로 유효 수강생이 있는" 회차를 찾는다.
-     * 학원 휴무일로 취소된 날짜와, 유효 수강생이 아무도 없는 날짜는 건너뛴다.
-     */
+    /** 후보 시간표 중 지금 이후로 가장 이르게 시작하는, 유효 수강생이 있는 회차를 찾는다. 휴무일/공백 회차는 건너뛴다. */
     private Optional<NextClassResponse> findNextOccurrence(List<RegularClass> candidates) {
         LocalDateTime now = LocalDateTime.now();
 
@@ -1133,7 +1050,7 @@ public class RegularClassService {
                     bestClass = regularClass;
                     bestSession = session;
                 }
-                break; // 이 수업에서 가장 이른 유효 후보를 찾았으니 다음 요일은 볼 필요 없다.
+                break; // 이 수업의 가장 이른 유효 후보를 찾았으니 다음 요일은 볼 필요 없다.
             }
         }
 

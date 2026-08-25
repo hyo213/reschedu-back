@@ -23,14 +23,8 @@ public class AcademyStudentRepositoryCustomImpl implements AcademyStudentReposit
         where.and(academyStudent.academy.id.eq(academyId));
 
         if (teacherUuid != null) {
-            // 🚨 담당 강사가 아직 배정되지 않은(teacher가 NULL인) 등록 건은 강사 필터와 무관하게 항상
-            // 보여야 한다 — 그래야 어느 강사든 "주인 없는" 학생(승인 대기중이든, 승인은 됐지만 아직
-            // 아무 강사에게도 배정되지 않았든)을 놓치지 않고 보고 담당을 맡을 수 있다. 이미 특정 강사가
-            // 배정된 건은 기존처럼 그 강사(또는 원장)에게만 보인다.
-            //
-            // 🎯 담당 강사 인계 중(effectiveFrom 전날까지)인 학생은 이전 강사에게도 함께 보여야 한다 —
-            // teacher는 인계 순간 이미 새 강사로 바뀌어 있으므로, previousTeacher + 아직 지나지 않은
-            // teacherHandoverEffectiveFrom 조합으로만 매칭되는 이전 강사 몫을 별도로 더한다.
+            // teacher가 아직 NULL인 등록 건은 모든 강사에게 보인다("주인 없는" 학생 배정 유도).
+            // 인계 중(effectiveFrom 전날까지)인 학생은 previousTeacher 조건으로 이전 강사에게도 함께 보인다.
             LocalDate today = LocalDate.now();
             where.and(academyStudent.teacher.uuid.eq(teacherUuid)
                     .or(academyStudent.teacher.isNull())
@@ -45,11 +39,8 @@ public class AcademyStudentRepositoryCustomImpl implements AcademyStudentReposit
                     .or(academyStudent.managementName.containsIgnoreCase(keyword)));
         }
 
-        // 기존 findByAcademyId 계열이 쓰던 @EntityGraph(student, student.parent)와 동일한 효과를
-        // fetchJoin으로 재현한다 — 목록 화면에서 학생/학부모 정보를 N+1 없이 한 번에 가져온다.
-        // 🚨 teacher는 반드시 leftJoin으로 명시해야 한다 — where절에서 academyStudent.teacher.uuid를
-        // 참조할 때 명시적 조인이 없으면 Hibernate가 암묵적 INNER JOIN을 생성해, teacher가 NULL인(아직
-        // 담당 강사가 없는) 로우가 where의 OR 조건과 무관하게 조인 단계에서 통째로 걸러져 버린다.
+        // student/student.parent는 fetchJoin으로 N+1을 피한다. teacher는 반드시 leftJoin으로 명시해야
+        // 한다 — 암묵적 INNER JOIN이 되면 teacher가 NULL인 로우가 where절과 무관하게 걸러진다.
         return queryFactory
                 .selectFrom(academyStudent)
                 .join(academyStudent.student, student).fetchJoin()

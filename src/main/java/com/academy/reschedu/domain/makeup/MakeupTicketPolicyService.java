@@ -28,10 +28,7 @@ public class MakeupTicketPolicyService {
         return MakeupTicketPolicyResponse.from(makeupTicketPolicyRepository.findByAcademy_Id(academyId).orElse(null));
     }
 
-    /**
-     * 🎯 원장 전용: 보강권 전체 정책(최대 보유 개수/월 발급 제한/기본 유효기간)을 설정한다.
-     * 아직 정책 행이 없는 학원이면(한 번도 설정한 적 없음) 이번에 처음 만든다.
-     */
+    /** 원장 전용: 보강권 전체 정책을 설정한다. 정책 행이 없는 학원이면 이번에 처음 만든다. */
     @Transactional
     public MakeupTicketPolicyResponse updatePolicy(Long academyId, MakeupTicketPolicyUpdateRequest request) {
         Member requester = currentMemberProvider.getCurrentMember();

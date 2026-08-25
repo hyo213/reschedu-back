@@ -145,8 +145,7 @@ public class MemberService {
         Member requester = validateRequesterBelongsToAcademy(academyId);
         validateManagerRole(requester);
 
-        Academy academy = academyRepository.findById(academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
+        Academy academy = getAcademyOrThrow(academyId);
 
         Member parent = memberRepository.findByPhone(request.parentPhone())
                 .orElseGet(() -> {
@@ -193,7 +192,7 @@ public class MemberService {
                 request.memo()
         );
 
-        // 🎯 수강 기간은 @NotNull 검증을 통과했으므로(컨트롤러의 @Valid) 항상 채워져 있다.
+        // 수강 기간은 컨트롤러의 @Valid로 항상 채워져 있다.
         validateEnrollmentPeriod(request.enrollmentStartDate(), request.enrollmentEndDate());
         academyStudent.updateEnrollmentPeriod(request.enrollmentStartDate(), request.enrollmentEndDate());
 
@@ -262,8 +261,7 @@ public class MemberService {
             throw new IllegalStateException("본인의 자녀 정보만 수정할 수 있습니다.");
         }
 
-        Academy academy = academyRepository.findById(request.academyId())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
+        Academy academy = getAcademyOrThrow(request.academyId());
 
         if (academyStudentRepository.existsByAcademyIdAndStudent_Id(academy.getId(), student.getId())) {
             throw new IllegalStateException("이미 등록된 학원입니다.");
@@ -298,8 +296,7 @@ public class MemberService {
         if (parent.getRole() != MemberRole.PARENT) {
             throw new IllegalStateException("학부모 계정만 자녀를 추가할 수 있습니다.");
         }
-        Academy academy = academyRepository.findById(request.academyId())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
+        Academy academy = getAcademyOrThrow(request.academyId());
 
         Student student = new Student(request.name(), request.birthDate(), request.gender(), request.childPhone(), parent);
         studentRepository.save(student);
@@ -395,16 +392,14 @@ public class MemberService {
 
     public StudentDetailResponse getStudentDetail(UUID studentUuid, Long academyId) {
         validateRequesterBelongsToAcademy(academyId);
-        AcademyStudent registration = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생이거나 존재하지 않습니다."));
+        AcademyStudent registration = getRegistrationOrThrow(studentUuid, academyId);
         return StudentDetailResponse.from(registration, LocalDate.now());
     }
 
     /** 특정 학생의 반 배정(요일/스케줄) 이력과 수강 기간 변경 이력을 함께 조회한다. */
     public StudentHistoryResponse getStudentHistory(UUID studentUuid, Long academyId) {
         validateRequesterBelongsToAcademy(academyId);
-        AcademyStudent registration = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생이거나 존재하지 않습니다."));
+        AcademyStudent registration = getRegistrationOrThrow(studentUuid, academyId);
 
         List<ScheduleHistoryResponse> scheduleHistory = regularClassService.getStudentScheduleHistory(academyId, studentUuid);
         List<EnrollmentPeriodHistoryResponse> enrollmentPeriodHistory = enrollmentPeriodHistoryRepository
@@ -423,8 +418,7 @@ public class MemberService {
 
         validateEnrollmentPeriod(request.enrollmentStartDate(), request.enrollmentEndDate());
 
-        AcademyStudent registration = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생이거나 존재하지 않습니다."));
+        AcademyStudent registration = getRegistrationOrThrow(studentUuid, academyId);
 
         // 덮어쓰기 전에 이전 값을 이력으로 스냅샷 남긴다.
         EnrollmentPeriodHistory history = EnrollmentPeriodHistory.builder()
@@ -447,8 +441,7 @@ public class MemberService {
     @Transactional
     public void updateStudent(UUID studentUuid, Long academyId, StudentUpdateRequest request) {
         validateRequesterBelongsToAcademy(academyId);
-        AcademyStudent registration = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 수강생 장부입니다."));
+        AcademyStudent registration = getLedgerOrThrow(studentUuid, academyId);
 
         LocalDate parsedBirthDate = null;
         if (request.birthDate() != null && !request.birthDate().trim().isEmpty()) {
@@ -478,8 +471,7 @@ public class MemberService {
     @Transactional
     public void scheduleStudentTeacherHandover(Long academyId, UUID studentUuid, StudentTeacherHandoverRequest request) {
         validateRequesterBelongsToAcademy(academyId);
-        AcademyStudent registration = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 수강생 장부입니다."));
+        AcademyStudent registration = getLedgerOrThrow(studentUuid, academyId);
 
         Member newTeacher = resolveTeacher(academyId, request.newTeacherUuid());
         if (newTeacher.getId().equals(registration.getTeacher() != null ? registration.getTeacher().getId() : null)) {
@@ -565,6 +557,21 @@ public class MemberService {
 
     private boolean isSameAcademy(Academy a, Academy b) {
         return a != null && b != null && a.getId().equals(b.getId());
+    }
+
+    private Academy getAcademyOrThrow(Long academyId) {
+        return academyRepository.findById(academyId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 학원입니다."));
+    }
+
+    private AcademyStudent getRegistrationOrThrow(UUID studentUuid, Long academyId) {
+        return academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생이거나 존재하지 않습니다."));
+    }
+
+    private AcademyStudent getLedgerOrThrow(UUID studentUuid, Long academyId) {
+        return academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 수강생 장부입니다."));
     }
 
     /** 담당 강사 지정은 해당 학원 소속의 TEACHER 권한 회원으로만 제한한다. */

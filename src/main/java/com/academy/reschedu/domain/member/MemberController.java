@@ -41,7 +41,6 @@ public class MemberController {
      */
     @PostMapping("/email/send")
     public ResponseEntity<Map<String, String>> sendVerificationEmail(@RequestParam("email") String email) {
-        // 중복 이메일 체크 후 인증 메일 발송 로직 호출
         memberService.sendVerificationEmail(email);
         return ResponseEntity.ok(Map.of("message", "인증 메일이 발송되었습니다."));
     }
@@ -101,11 +100,7 @@ public class MemberController {
         return ResponseEntity.ok(memberService.getMyChildrenDetail());
     }
 
-    /**
-     * 🎯 [다학원 자녀 지원] 학부모 전용: 자녀들이 다니는 학원 목록(중복 제거) — 보강 신청/공지사항
-     * 화면의 "학원 선택" 셀렉트박스에 쓴다.
-     * GET /api/members/my-children-academies
-     */
+    /** 학부모 전용: 자녀들이 다니는 학원 목록(중복 제거) — 보강 신청/공지사항 화면의 학원 선택 셀렉트박스에 쓴다. */
     @GetMapping("/my-children-academies")
     public ResponseEntity<List<AcademySummaryResponse>> getMyChildrenAcademies() {
         return ResponseEntity.ok(memberService.getMyChildrenAcademies());
@@ -133,10 +128,7 @@ public class MemberController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * 🎯 [다학원 자녀 지원] 학부모 전용: 이미 등록된 자녀를 다른 학원에도 다니게 한다(승인 대기 상태로 추가).
-     * POST /api/members/my-children/{studentUuid}/academies
-     */
+    /** 학부모 전용: 이미 등록된 자녀를 다른 학원에도 다니게 한다(승인 대기 상태로 추가). */
     @PostMapping("/my-children/{studentUuid}/academies")
     public ResponseEntity<Void> addAcademyToMyChild(
             @PathVariable("studentUuid") UUID studentUuid,
@@ -182,10 +174,7 @@ public class MemberController {
         return ResponseEntity.ok(memberService.getStudentDetail(uuid, academyId));
     }
 
-    /**
-     * 🎯 [수강 히스토리] 특정 학생의 반 배정(요일/스케줄) 이력 + 수강 기간 변경 이력 조회
-     * GET /api/members/students/{uuid}/history?academyId=1
-     */
+    /** 특정 학생의 반 배정(요일/스케줄) 이력 + 수강 기간 변경 이력 조회 */
     @GetMapping("/students/{uuid}/history")
     public ResponseEntity<StudentHistoryResponse> getStudentHistory(
             @PathVariable("uuid") UUID uuid,
@@ -206,11 +195,7 @@ public class MemberController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * 🎯 [수강생 관리] 담당 강사 인계(효력일 지정) API — 원장/강사 모두 호출 가능.
-     * 새 강사는 즉시, 기존 강사는 effectiveFrom 전날까지 [수강생 관리] 목록에서 계속 보인다.
-     * POST /api/members/students/{uuid}/teacher-handover?academyId=1
-     */
+    /** 담당 강사 인계(효력일 지정) — 원장/강사 모두 호출 가능. 새 강사는 즉시, 기존 강사는 effectiveFrom 전날까지 목록에 남는다. */
     @PostMapping("/students/{uuid}/teacher-handover")
     public ResponseEntity<Void> scheduleStudentTeacherHandover(
             @PathVariable("uuid") UUID uuid,
@@ -220,11 +205,7 @@ public class MemberController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * 🎯 [수강생 관리] 화면 전용: 수강 기간(수강료 납부 기간) 등록/연장 API.
-     * 정규 수업 관리 화면에서는 더 이상 이 정보를 다루지 않는다.
-     * PATCH /api/members/students/{uuid}/enrollment-period?academyId=1
-     */
+    /** [수강생 관리] 화면 전용: 수강 기간(수강료 납부 기간) 등록/연장 */
     @PatchMapping("/students/{uuid}/enrollment-period")
     public ResponseEntity<Void> updateEnrollmentPeriod(
             @PathVariable("uuid") UUID uuid,

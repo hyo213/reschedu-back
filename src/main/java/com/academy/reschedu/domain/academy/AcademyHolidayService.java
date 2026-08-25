@@ -47,9 +47,7 @@ public class AcademyHolidayService {
                 .build();
         academyHolidayRepository.save(holiday);
 
-        // 🎯 휴무일 지정과 동시에, 그 요일에 해당하는 모든 정규 수업의 회차를 확보(생성 또는 갱신)하고
-        // 회차 로스터 전원에게 보강권을 자동 발급한다. (RegularClassSession 기반 — 세션이 아직 없다면
-        // 그 시점의 로스터를 스냅샷해 새로 만들고, 이미 있다면 휴무로 갱신 후 발급한다.)
+        // 그 요일의 모든 정규 수업 회차를 확보(생성/갱신)하고 로스터 전원에게 보강권을 자동 발급한다.
         int issuedCount = regularClassService.applyHolidayToSessions(academy, request.date());
 
         return HolidayResponse.of(holiday, issuedCount);
@@ -97,8 +95,7 @@ public class AcademyHolidayService {
             throw new IllegalStateException("휴무일 수정은 원장 또는 강사만 할 수 있습니다.");
         }
 
-        AcademyHoliday holiday = academyHolidayRepository.findByUuidAndAcademyId(holidayUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 휴무일입니다."));
+        AcademyHoliday holiday = getHolidayOrThrow(holidayUuid, academyId);
 
         holiday.updateReason(request.reason());
         return HolidayResponse.of(holiday, null);
@@ -117,13 +114,17 @@ public class AcademyHolidayService {
             throw new IllegalStateException("휴무일 지정 취소는 원장 또는 강사만 할 수 있습니다.");
         }
 
-        AcademyHoliday holiday = academyHolidayRepository.findByUuidAndAcademyId(holidayUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 휴무일입니다."));
+        AcademyHoliday holiday = getHolidayOrThrow(holidayUuid, academyId);
 
         int retractedCount = regularClassService.revertHolidayForSessions(holiday.getAcademy(), holiday.getDate());
 
         academyHolidayRepository.delete(holiday);
         return retractedCount;
+    }
+
+    private AcademyHoliday getHolidayOrThrow(UUID holidayUuid, Long academyId) {
+        return academyHolidayRepository.findByUuidAndAcademyId(holidayUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 휴무일입니다."));
     }
 
     private Member validateRequesterBelongsToAcademy(Long academyId) {

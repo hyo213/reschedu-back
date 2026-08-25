@@ -65,10 +65,7 @@ public class NoticeService {
                 .toList();
     }
 
-    /**
-     * 소속 회원 전원(원장/강사/학부모) 전용: 오늘 기준으로 실제 노출 중인 공지만. 대시보드/게시판 읽기용.
-     * 🎯 [다학원 자녀 지원] 학부모는 본인 소속 학원이 아니라도 자녀가 다니는 학원이면 조회할 수 있다.
-     */
+    /** 소속 회원 전원 전용: 오늘 기준 노출 중인 공지만. 학부모는 자녀가 다니는 학원이면 조회 가능. */
     public List<NoticeResponse> getActiveNotices(Long academyId) {
         validateReaderCanAccessAcademy(academyId);
 
@@ -77,11 +74,7 @@ public class NoticeService {
                 .toList();
     }
 
-    /**
-     * 🎯 [다학원 자녀 지원] 학부모 전용: 대시보드용 — 자녀들이 다니는 모든 학원의 노출 중인 공지를
-     * 한데 모아 최신순으로 반환한다. 각 항목에 학원명이 함께 담겨 있으므로 프론트에서 "(학원명) 제목"으로
-     * 표시할 수 있다.
-     */
+    /** 학부모 전용: 자녀들이 다니는 모든 학원의 노출 중인 공지를 모아 최신순으로 반환한다. */
     public List<NoticeResponse> getActiveNoticesForMyChildren() {
         Member parent = currentMemberProvider.getCurrentMember();
         if (parent.getRole() != MemberRole.PARENT) {
@@ -105,15 +98,11 @@ public class NoticeService {
                 .toList();
     }
 
-    /**
-     * 소속 회원 전원 전용: 공지 상세 조회. 학부모는 현재 노출 중인 공지만 볼 수 있다.
-     * 🎯 [다학원 자녀 지원] 학부모는 본인 소속 학원이 아니라도 자녀가 다니는 학원이면 조회할 수 있다.
-     */
+    /** 소속 회원 전원 전용: 공지 상세 조회. 학부모는 현재 노출 중인 공지만, 자녀가 다니는 학원이면 조회 가능. */
     public NoticeResponse getNotice(Long academyId, UUID noticeUuid) {
         Member requester = validateReaderCanAccessAcademy(academyId);
 
-        Notice notice = noticeRepository.findByUuidAndAcademyId(noticeUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 공지입니다."));
+        Notice notice = getNoticeOrThrow(noticeUuid, academyId);
 
         boolean isWriter = requester.getRole() == MemberRole.ADMIN || requester.getRole() == MemberRole.TEACHER;
         if (!isWriter && !notice.isCurrentlyVisible(LocalDate.now())) {
@@ -129,8 +118,7 @@ public class NoticeService {
         Member requester = validateRequesterBelongsToAcademy(academyId);
         requireWriter(requester);
 
-        Notice notice = noticeRepository.findByUuidAndAcademyId(noticeUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 공지입니다."));
+        Notice notice = getNoticeOrThrow(noticeUuid, academyId);
 
         notice.update(
                 request.title(),
@@ -149,10 +137,12 @@ public class NoticeService {
         Member requester = validateRequesterBelongsToAcademy(academyId);
         requireWriter(requester);
 
-        Notice notice = noticeRepository.findByUuidAndAcademyId(noticeUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 공지입니다."));
+        noticeRepository.delete(getNoticeOrThrow(noticeUuid, academyId));
+    }
 
-        noticeRepository.delete(notice);
+    private Notice getNoticeOrThrow(UUID noticeUuid, Long academyId) {
+        return noticeRepository.findByUuidAndAcademyId(noticeUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 공지입니다."));
     }
 
     private void requireWriter(Member requester) {
@@ -169,10 +159,7 @@ public class NoticeService {
         return requester;
     }
 
-    /**
-     * 🎯 [다학원 자녀 지원] 조회 전용 완화 버전 — 원장/강사는 본인 소속 학원만 허용하지만, 학부모는
-     * 본인 Member.academy와 무관하게 자녀가 실제로 다니는 학원이면 조회를 허용한다.
-     */
+    /** 조회 전용 완화 버전 — 학부모는 본인 소속 학원과 무관하게 자녀가 다니는 학원이면 조회를 허용한다. */
     private Member validateReaderCanAccessAcademy(Long academyId) {
         Member requester = currentMemberProvider.getCurrentMember();
         if (requester.getAcademy() != null && requester.getAcademy().getId().equals(academyId)) {

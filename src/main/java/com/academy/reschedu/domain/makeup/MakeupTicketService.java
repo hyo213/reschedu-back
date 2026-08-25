@@ -65,9 +65,7 @@ public class MakeupTicketService {
             throw new IllegalArgumentException("지정한 날짜는 해당 수업의 정규 요일이 아닙니다.");
         }
 
-        AcademyStudent academyStudent = academyStudentRepository
-                .findByStudentUuidAndAcademyId(request.studentUuid(), regularClass.getAcademy().getId())
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(request.studentUuid(), regularClass.getAcademy().getId());
 
         boolean isEnrolled = regularClassStudentRepository
                 .existsByRegularClass_IdAndAcademyStudent_Id(regularClass.getId(), academyStudent.getId());
@@ -108,9 +106,7 @@ public class MakeupTicketService {
 
         validateAbsenceRequester(requester, student, regularClass);
 
-        AcademyStudent academyStudent = academyStudentRepository
-                .findByStudentUuidAndAcademyId(request.studentUuid(), regularClass.getAcademy().getId())
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(request.studentUuid(), regularClass.getAcademy().getId());
 
         MakeupTicket ticket = makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSource(
                         regularClass.getId(), academyStudent.getId(), request.absentDate(), MakeupTicketSource.STUDENT_ABSENCE)
@@ -234,11 +230,7 @@ public class MakeupTicketService {
     /** 정책 위반 사유 메시지(없으면 null) — 최대 보유 개수 초과를 먼저, 그 다음 월 발급 제한 초과를 확인한다. */
     private String findLimitViolationMessage(AcademyStudent academyStudent, MakeupTicketPolicy policy, int quantity) {
         if (policy.getMaxOutstandingTickets() != null) {
-            long outstanding = makeupTicketRepository
-                    .findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(academyStudent.getId(), MakeupTicketStatus.UNUSED)
-                    .stream()
-                    .filter(MakeupTicket::isCurrentlyValid)
-                    .count();
+            long outstanding = countValidUnusedTickets(academyStudent.getId());
             if (outstanding + quantity > policy.getMaxOutstandingTickets()) {
                 return String.format(
                         "이 학생이 보유 가능한 보강권 최대 개수(%d개)를 초과하게 됩니다. (현재 보유 %d개, 요청 %d개)",
@@ -271,8 +263,7 @@ public class MakeupTicketService {
             throw new IllegalStateException("소속 학원의 수강생에게만 보강권을 지급할 수 있습니다.");
         }
 
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(request.studentUuid(), academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+        AcademyStudent academyStudent = getAcademyStudentOrThrow(request.studentUuid(), academyId);
 
         MakeupTicketPolicy policy = resolvePolicy(academyId);
         validateIssuanceLimits(academyStudent, policy, request.quantity(), requester, request.overrideLimit());
@@ -301,23 +292,15 @@ public class MakeupTicketService {
      * 보강 매칭 센터용: 학원 소속 전체 수강생의 잔여(미사용) 보강권 개수를 집계한다.
      */
     public List<StudentTicketCountResponse> getRemainingTicketCounts(Long academyId) {
-        Member requester = currentMemberProvider.getCurrentMember();
-        if (requester.getAcademy() == null || !requester.getAcademy().getId().equals(academyId)) {
-            throw new IllegalStateException("소속 학원의 보강권 현황만 조회할 수 있습니다.");
-        }
+        validateRequesterBelongsToAcademy(academyId);
 
         return academyStudentRepository.findByAcademyId(academyId).stream()
-                // 승인 대기 중인 등록 건은 보강 매칭 대상에서 제외한다.
-                .filter(AcademyStudent::isApproved)
+                .filter(AcademyStudent::isApproved) // 승인 대기 중인 등록 건은 보강 매칭 대상에서 제외한다.
                 .map(academyStudent -> new StudentTicketCountResponse(
                         academyStudent.getStudent().getUuid(),
                         academyStudent.getStudent().getName(),
                         academyStudent.getManagementName(),
-                        makeupTicketRepository
-                                .findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(academyStudent.getId(), MakeupTicketStatus.UNUSED)
-                                .stream()
-                                .filter(MakeupTicket::isCurrentlyValid)
-                                .count()
+                        countValidUnusedTickets(academyStudent.getId())
                 ))
                 .toList();
     }
@@ -354,15 +337,8 @@ public class MakeupTicketService {
 
     /** 원장/강사 전용: 특정 학생의 보강권 전체 이력(미사용/사용/만료 포함)을 최신순으로 반환한다. */
     public List<MakeupTicketDetailResponse> getTicketDetails(Long academyId, UUID studentUuid) {
-        Member requester = currentMemberProvider.getCurrentMember();
-        if (requester.getAcademy() == null || !requester.getAcademy().getId().equals(academyId)) {
-            throw new IllegalStateException("소속 학원의 보강권 현황만 조회할 수 있습니다.");
-        }
-
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
-
-        return ticketHistory(academyStudent);
+        validateRequesterBelongsToAcademy(academyId);
+        return ticketHistory(getAcademyStudentOrThrow(studentUuid, academyId));
     }
 
     /** 학부모 전용: 본인 자녀 한 명의 보강권 전체 이력을 최신순으로 반환한다. */
@@ -378,10 +354,7 @@ public class MakeupTicketService {
             throw new IllegalStateException("본인 자녀의 보강권 이력만 조회할 수 있습니다.");
         }
 
-        AcademyStudent academyStudent = academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
-
-        return ticketHistory(academyStudent);
+        return ticketHistory(getAcademyStudentOrThrow(studentUuid, academyId));
     }
 
     private List<MakeupTicketDetailResponse> ticketHistory(AcademyStudent academyStudent) {
@@ -404,5 +377,27 @@ public class MakeupTicketService {
                     return true;
                 })
                 .orElse(false);
+    }
+
+    private AcademyStudent getAcademyStudentOrThrow(UUID studentUuid, Long academyId) {
+        return academyStudentRepository.findByStudentUuidAndAcademyId(studentUuid, academyId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
+    }
+
+    private Member validateRequesterBelongsToAcademy(Long academyId) {
+        Member requester = currentMemberProvider.getCurrentMember();
+        if (requester.getAcademy() == null || !requester.getAcademy().getId().equals(academyId)) {
+            throw new IllegalStateException("소속 학원의 보강권 현황만 조회할 수 있습니다.");
+        }
+        return requester;
+    }
+
+    /** 유효기간이 지나지 않은 미사용 보강권 개수. */
+    private long countValidUnusedTickets(Long academyStudentId) {
+        return makeupTicketRepository
+                .findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(academyStudentId, MakeupTicketStatus.UNUSED)
+                .stream()
+                .filter(MakeupTicket::isCurrentlyValid)
+                .count();
     }
 }

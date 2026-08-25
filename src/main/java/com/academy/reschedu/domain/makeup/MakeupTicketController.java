@@ -96,11 +96,7 @@ public class MakeupTicketController {
 
     // ─── 예외 처리 ──────────────────────────────────────────────────────────
 
-    /**
-     * 🎯 [보강권 전체 정책] 원장/강사가 결석 대리 처리 또는 수동 지급 시 발급 제한을 초과했을 때만 던져진다.
-     * 일반 오류(400)와 구분되는 409로 응답해, 프론트가 이 경우엔 alert 대신 confirm(예/아니오)을 띄우고
-     * "예"를 누르면 overrideLimit=true로 재요청하도록 한다.
-     */
+    /** 발급 제한 초과 시 409로 응답 — 프론트가 alert 대신 confirm을 띄우고 overrideLimit=true로 재요청하도록 유도한다. */
     @ExceptionHandler(MakeupTicketLimitExceededException.class)
     public ResponseEntity<Map<String, Object>> handleLimitExceededException(MakeupTicketLimitExceededException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", e.getMessage(), "limitExceeded", true));
