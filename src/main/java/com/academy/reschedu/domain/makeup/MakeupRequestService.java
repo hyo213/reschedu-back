@@ -144,7 +144,8 @@ public class MakeupRequestService {
         if (!targetClass.getDaysOfWeek().contains(request.targetDate().getDayOfWeek())) {
             throw new IllegalArgumentException("지정한 날짜는 해당 수업의 정규 요일이 아닙니다.");
         }
-        if (request.targetDate().isBefore(LocalDate.now())) {
+        // 원장/강사는 지난 날짜도 사후 매칭/관리할 수 있어야 하므로 이 제한은 학부모 신청에만 적용한다.
+        if (requester.getRole() == MemberRole.PARENT && request.targetDate().isBefore(LocalDate.now())) {
             throw new IllegalArgumentException("이미 지난 날짜로는 보강을 신청할 수 없습니다.");
         }
 
@@ -161,12 +162,9 @@ public class MakeupRequestService {
 
         validateNoScheduleConflict(academyStudent, targetClass, targetSession, request.targetDate());
 
-        // 결석 처리된 학생은 정원 계산에서 제외하고, 아직 수락 전인 대기(PENDING) 신청도 자리를 예약 중인
-        // 것으로 보고 더한다 — 그래야 정원 4석에 10명이 동시에 몰려도 딱 4명만 신청에 성공한다.
-        long enrolledCount = regularClassSessionStudentRepository.findBySession_Id(targetSession.getId()).stream()
-                .filter(rcss -> !makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(
-                        targetClass.getId(), rcss.getAcademyStudent().getId(), request.targetDate()))
-                .count();
+        // 결석 처리된 학생은 정원 계산에서 제외하고, 대기(PENDING) 신청도 자리를 예약 중인 것으로 더한다
+        // — 그래야 정원 4석에 10명이 동시에 몰려도 딱 4명만 신청에 성공한다.
+        long enrolledCount = countAttendingExcludingAbsences(targetClass, targetSession, request.targetDate());
         long pendingCount = makeupRequestRepository.countByTargetRegularClass_IdAndTargetDateAndStatus(
                 targetClass.getId(), request.targetDate(), MakeupRequestStatus.PENDING);
         if (enrolledCount + pendingCount >= targetSession.getMaxCapacity()) {
@@ -234,6 +232,14 @@ public class MakeupRequestService {
         return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
     }
 
+    /** 결석 처리된 학생을 제외한, 이 회차에 실제로 출석 예정인 인원 수. */
+    private long countAttendingExcludingAbsences(RegularClass targetClass, RegularClassSession session, LocalDate date) {
+        return regularClassSessionStudentRepository.findBySession_Id(session.getId()).stream()
+                .filter(rcss -> !makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(
+                        targetClass.getId(), rcss.getAcademyStudent().getId(), date))
+                .count();
+    }
+
     /**
      * 학부모: 본인 자녀에 대해서만 허용. 원장/강사: 자신이 소속된 학원의 수업에 대해서만 허용.
      */
@@ -294,10 +300,7 @@ public class MakeupRequestService {
 
         RegularClassSession targetSession = regularClassService.ensureSessionForMakeupBooking(targetClass, makeupRequest.getTargetDate());
 
-        long currentCount = regularClassSessionStudentRepository.findBySession_Id(targetSession.getId()).stream()
-                .filter(rcss -> !makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(
-                        targetClass.getId(), rcss.getAcademyStudent().getId(), makeupRequest.getTargetDate()))
-                .count();
+        long currentCount = countAttendingExcludingAbsences(targetClass, targetSession, makeupRequest.getTargetDate());
         if (currentCount >= targetSession.getMaxCapacity()) {
             throw new IllegalStateException("정원이 가득 차 더 이상 수락할 수 없습니다. 거절 처리해주세요.");
         }
@@ -360,7 +363,7 @@ public class MakeupRequestService {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("락 획득 중 인터럽트가 발생했습니다.", e);
         } finally {
-            // 🎯 여러 요청이 같은 자리를 두고 경합할 때 실제로 얼마나 대기했는지 관찰하기 위한 지표.
+            // 락 대기 시간 관찰용 지표.
             sample.stop(meterRegistry.timer("makeup.slot.lock.wait"));
         }
         if (!acquired) {

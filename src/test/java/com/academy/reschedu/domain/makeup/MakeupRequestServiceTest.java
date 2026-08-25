@@ -244,6 +244,29 @@ class MakeupRequestServiceTest {
         }
 
         @Test
+        void 원장_강사는_과거_날짜도_신청할_수_있다() {
+            Member admin = new Member("admin@test.com", "e", "원장", "010-0000-0003", MemberRole.ADMIN, academy);
+            when(currentMemberProvider.getCurrentMember()).thenReturn(admin);
+            when(studentRepository.findByUuid(child.getUuid())).thenReturn(java.util.Optional.of(child));
+            when(regularClassRepository.findByUuid(targetClass.getUuid())).thenReturn(java.util.Optional.of(targetClass));
+            when(academyStudentRepository.findByStudentUuidAndAcademyId(child.getUuid(), 1L))
+                    .thenReturn(java.util.Optional.of(academyStudent));
+            when(regularClassService.ensureSessionForMakeupBooking(targetClass, pastTuesday)).thenReturn(targetSession);
+            when(regularClassSessionStudentRepository.existsBySession_IdAndAcademyStudent_Id(50L, 40L))
+                    .thenReturn(false);
+            when(regularClassSessionStudentRepository.findBySession_Id(50L)).thenReturn(List.of());
+            MakeupTicket ticket = unusedTicket();
+            when(makeupTicketRepository.findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(40L, MakeupTicketStatus.UNUSED))
+                    .thenReturn(List.of(ticket));
+            when(makeupRequestRepository.existsByTicket_IdAndStatusIn(eq(60L), any())).thenReturn(false);
+            when(makeupRequestRepository.save(any(MakeupRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            MakeupRequestCreateRequest request = new MakeupRequestCreateRequest(
+                    child.getUuid(), targetClass.getUuid(), pastTuesday);
+            makeupRequestService.createRequest(request);
+        }
+
+        @Test
         void 같은_시간에_다니는_다른_정규수업이_있으면_신청할_수_없다() {
             when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
             when(studentRepository.findByUuid(child.getUuid())).thenReturn(java.util.Optional.of(child));
