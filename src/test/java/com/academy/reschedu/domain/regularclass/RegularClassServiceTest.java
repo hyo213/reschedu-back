@@ -1,11 +1,13 @@
 package com.academy.reschedu.domain.regularclass;
 
 import com.academy.reschedu.domain.academy.Academy;
+import com.academy.reschedu.domain.academy.AcademyHoliday;
 import com.academy.reschedu.domain.academy.AcademyHolidayRepository;
 import com.academy.reschedu.domain.academy.AcademyRepository;
 import com.academy.reschedu.domain.makeup.MakeupRequestRepository;
 import com.academy.reschedu.domain.makeup.MakeupTicketRepository;
 import com.academy.reschedu.domain.makeup.MakeupTicketService;
+import com.academy.reschedu.domain.makeup.MakeupTicketSource;
 import com.academy.reschedu.domain.member.AcademyStudent;
 import com.academy.reschedu.domain.member.AcademyStudentRepository;
 import com.academy.reschedu.domain.member.Member;
@@ -29,6 +31,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -91,7 +94,8 @@ class RegularClassServiceTest {
 
         admin = new Member("admin@test.com", "encoded", "원장", "010-0000-0001", MemberRole.ADMIN, academy);
         ReflectionTestUtils.setField(admin, "id", 10L);
-        when(currentMemberProvider.getCurrentMember()).thenReturn(admin);
+        // 🎯 인증 컨텍스트를 쓰지 않는 메서드(applyHolidayToSessions 등) 테스트도 있으므로 lenient 처리한다.
+        lenient().when(currentMemberProvider.getCurrentMember()).thenReturn(admin);
 
         teacher = new Member("teacher@test.com", "encoded", "강사", "010-0000-0002", MemberRole.TEACHER, academy);
         ReflectionTestUtils.setField(teacher, "id", 11L);
@@ -388,6 +392,50 @@ class RegularClassServiceTest {
 
             assertThat(academyStudent.getTeacher().getId()).isEqualTo(teacher3.getId());
             assertThat(academyStudent.getPreviousTeacher().getId()).isEqualTo(teacher2.getId());
+        }
+    }
+
+    @Nested
+    class ApplyHolidayToSessions {
+
+        @Test
+        void issueMakeupTickets가_true면_보강권을_발급한다() {
+            LocalDate monday = LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+            RegularClass regularClass = buildClass(10);
+            AcademyStudent student = activeStudentFixture(UUID.randomUUID());
+            AcademyHoliday holiday = AcademyHoliday.builder()
+                    .academy(academy).date(monday).issueMakeupTickets(true).build();
+
+            when(regularClassRepository.findByAcademyId(1L)).thenReturn(List.of(regularClass));
+            when(regularClassSessionRepository.findByRegularClass_IdAndDate(500L, monday)).thenReturn(Optional.empty());
+            when(academyHolidayRepository.findByAcademyIdAndDate(1L, monday)).thenReturn(Optional.of(holiday));
+            when(regularClassStudentRepository.findByRegularClass_Id(500L))
+                    .thenReturn(List.of(new RegularClassStudent(regularClass, student)));
+            when(makeupTicketService.issueTicketIfNeeded(student, regularClass, monday, MakeupTicketSource.ACADEMY_HOLIDAY))
+                    .thenReturn(true);
+
+            int issuedCount = regularClassService.applyHolidayToSessions(academy, monday);
+
+            assertThat(issuedCount).isEqualTo(1);
+        }
+
+        @Test
+        void issueMakeupTickets가_false면_보강권을_발급하지_않는다() {
+            LocalDate monday = LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+            RegularClass regularClass = buildClass(10);
+            AcademyStudent student = activeStudentFixture(UUID.randomUUID());
+            AcademyHoliday holiday = AcademyHoliday.builder()
+                    .academy(academy).date(monday).issueMakeupTickets(false).build();
+
+            when(regularClassRepository.findByAcademyId(1L)).thenReturn(List.of(regularClass));
+            when(regularClassSessionRepository.findByRegularClass_IdAndDate(500L, monday)).thenReturn(Optional.empty());
+            when(academyHolidayRepository.findByAcademyIdAndDate(1L, monday)).thenReturn(Optional.of(holiday));
+            when(regularClassStudentRepository.findByRegularClass_Id(500L))
+                    .thenReturn(List.of(new RegularClassStudent(regularClass, student)));
+
+            int issuedCount = regularClassService.applyHolidayToSessions(academy, monday);
+
+            assertThat(issuedCount).isEqualTo(0);
         }
     }
 }

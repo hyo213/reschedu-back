@@ -460,11 +460,14 @@ public class RegularClassService {
     }
 
     /**
-     * 세션을 (없으면 생성하며) 최신 휴무 상태로 맞추고, 이번 호출로 새로 확정된 휴무라면 로스터
-     * 전원에게 보강권을 발급한다. 조회 경로와 휴무일 등록 경로가 공유하는 핵심 로직.
+     * 세션을 (없으면 생성하며) 최신 휴무 상태로 맞추고, 이번 호출로 새로 확정된 휴무이면서 그 휴무가
+     * 보강권 발급 대상(AcademyHoliday.issueMakeupTickets)이면 로스터 전원에게 보강권을 발급한다.
+     * 조회 경로와 휴무일 등록 경로가 공유하는 핵심 로직.
      */
     private SessionSyncResult syncSessionForDate(RegularClass regularClass, LocalDate date) {
-        boolean holidayExists = academyHolidayRepository.existsByAcademyIdAndDate(regularClass.getAcademy().getId(), date);
+        Optional<AcademyHoliday> holiday = academyHolidayRepository.findByAcademyIdAndDate(regularClass.getAcademy().getId(), date);
+        boolean holidayExists = holiday.isPresent();
+        boolean issueTickets = holiday.map(AcademyHoliday::isIssueMakeupTickets).orElse(false);
         Optional<RegularClassSession> existing = regularClassSessionRepository.findByRegularClass_IdAndDate(regularClass.getId(), date);
 
         if (existing.isEmpty()) {
@@ -491,7 +494,7 @@ public class RegularClassService {
                     continue;
                 }
                 regularClassSessionStudentRepository.save(new RegularClassSessionStudent(session, academyStudent, false));
-                if (holidayExists && makeupTicketService.issueTicketIfNeeded(academyStudent, regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY)) {
+                if (issueTickets && makeupTicketService.issueTicketIfNeeded(academyStudent, regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY)) {
                     issuedCount++;
                 }
             }
@@ -503,11 +506,11 @@ public class RegularClassService {
             return new SessionSyncResult(session, 0);
         }
 
-        // 이미 생성된 회차가 뒤늦게 휴무일로 지정된 경우 — 지금 확정하고 즉시 발급한다.
+        // 이미 생성된 회차가 뒤늦게 휴무일로 지정된 경우 — 지금 확정하고, 발급 대상이면 즉시 발급한다.
         session.markHolidayCancelled();
         int issuedCount = 0;
         for (RegularClassSessionStudent rcss : regularClassSessionStudentRepository.findBySession_Id(session.getId())) {
-            if (makeupTicketService.issueTicketIfNeeded(rcss.getAcademyStudent(), regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY)) {
+            if (issueTickets && makeupTicketService.issueTicketIfNeeded(rcss.getAcademyStudent(), regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY)) {
                 issuedCount++;
             }
         }

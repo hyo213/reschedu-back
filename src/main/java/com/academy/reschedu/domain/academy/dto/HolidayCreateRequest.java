@@ -9,6 +9,9 @@ public record HolidayCreateRequest(
         LocalDate date,
 
         // 휴무 사유 (선택 입력)
-        String reason
+        String reason,
+
+        // 보강권 자동 발급 여부 (선택 입력, 생략 시 true)
+        Boolean issueMakeupTickets
 ) {
 }

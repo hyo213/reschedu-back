@@ -17,5 +17,7 @@ public interface AcademyHolidayRepository extends JpaRepository<AcademyHoliday, 
 
     boolean existsByAcademyIdAndDate(Long academyId, LocalDate date);
 
+    Optional<AcademyHoliday> findByAcademyIdAndDate(Long academyId, LocalDate date);
+
     Optional<AcademyHoliday> findByUuidAndAcademyId(UUID uuid, Long academyId);
 }

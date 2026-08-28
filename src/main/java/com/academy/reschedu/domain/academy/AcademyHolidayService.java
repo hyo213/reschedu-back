@@ -40,14 +40,16 @@ public class AcademyHolidayService {
             throw new IllegalStateException("이미 등록된 휴무일입니다.");
         }
 
+        boolean issueMakeupTickets = request.issueMakeupTickets() == null || request.issueMakeupTickets();
         AcademyHoliday holiday = AcademyHoliday.builder()
                 .academy(academy)
                 .date(request.date())
                 .reason(request.reason())
+                .issueMakeupTickets(issueMakeupTickets)
                 .build();
         academyHolidayRepository.save(holiday);
 
-        // 그 요일의 모든 정규 수업 회차를 확보(생성/갱신)하고 로스터 전원에게 보강권을 자동 발급한다.
+        // issueMakeupTickets가 true일 때만 보강권을 발급한다.
         int issuedCount = regularClassService.applyHolidayToSessions(academy, request.date());
 
         return HolidayResponse.of(holiday, issuedCount);

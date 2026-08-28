@@ -65,7 +65,7 @@ class AcademyHolidayServiceTest {
             when(academyHolidayRepository.existsByAcademyIdAndDate(1L, holidayDate)).thenReturn(false);
             when(regularClassService.applyHolidayToSessions(academy, holidayDate)).thenReturn(3);
 
-            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무");
+            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무", null);
             var response = academyHolidayService.createHoliday(1L, request);
 
             assertThat(response.issuedTicketCount()).isEqualTo(3);
@@ -77,7 +77,7 @@ class AcademyHolidayServiceTest {
             when(academyRepository.findById(1L)).thenReturn(Optional.of(academy));
             when(academyHolidayRepository.existsByAcademyIdAndDate(1L, holidayDate)).thenReturn(true);
 
-            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무");
+            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무", null);
 
             assertThatThrownBy(() -> academyHolidayService.createHoliday(1L, request))
                     .isInstanceOf(IllegalStateException.class)
@@ -90,7 +90,7 @@ class AcademyHolidayServiceTest {
             Member parent = new Member("parent@test.com", "e", "학부모", "010-0000-0002", MemberRole.PARENT, academy);
             when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
 
-            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무");
+            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무", null);
 
             assertThatThrownBy(() -> academyHolidayService.createHoliday(1L, request))
                     .isInstanceOf(IllegalStateException.class)
@@ -104,7 +104,7 @@ class AcademyHolidayServiceTest {
             Member otherAdmin = new Member("other@test.com", "e", "다른원장", "010-0000-0003", MemberRole.ADMIN, otherAcademy);
             when(currentMemberProvider.getCurrentMember()).thenReturn(otherAdmin);
 
-            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무");
+            HolidayCreateRequest request = new HolidayCreateRequest(holidayDate, "임시 휴무", null);
 
             assertThatThrownBy(() -> academyHolidayService.createHoliday(1L, request))
                     .isInstanceOf(IllegalStateException.class)

@@ -14,8 +14,8 @@ import java.util.UUID;
 /**
  * [AcademyHoliday] 학원 휴무일
  *
- * 이 날짜에 예정되어 있던 모든 정규 수업은 자동 취소되며, 등록 시점에 해당 수업들의 수강생 전원에게
- * 보강권이 자동 발급된다(발급 로직은 MakeupTicketService가 담당).
+ * 이 날짜에 예정되어 있던 모든 정규 수업은 자동 취소되며, issueMakeupTickets가 true면 등록 시점에
+ * 해당 수업들의 수강생 전원에게 보강권이 자동 발급된다(발급 로직은 MakeupTicketService가 담당).
  */
 @Entity
 @Table(
@@ -50,11 +50,16 @@ public class AcademyHoliday extends BaseEntity {
     @Column(name = "reason", length = 100)
     private String reason;
 
+    /** 보강권 자동 발급 여부 */
+    @Column(name = "issue_makeup_tickets", nullable = false)
+    private boolean issueMakeupTickets;
+
     @Builder
-    private AcademyHoliday(Academy academy, LocalDate date, String reason) {
+    private AcademyHoliday(Academy academy, LocalDate date, String reason, boolean issueMakeupTickets) {
         this.academy = academy;
         this.date = date;
         this.reason = reason;
+        this.issueMakeupTickets = issueMakeupTickets;
     }
 
     /** 휴무 사유 수정 (원장 전용, 날짜/학원은 변경하지 않는다 — 날짜를 바꾸려면 취소 후 재등록한다). */
