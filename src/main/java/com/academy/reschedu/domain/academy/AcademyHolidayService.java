@@ -102,10 +102,11 @@ public class AcademyHolidayService {
     }
 
     /**
-     * 원장 전용: 휴무일 지정 취소. 그 날짜에 해당하는 정규 수업 회차들을 원래 상태로 복원하고,
-     * 휴무로 인해 발급되었던 미사용 보강권을 회수한다(학생마다 -1개).
+     * 원장 전용: 휴무일 지정 취소. 그 날짜에 해당하는 정규 수업 회차들을 원래 상태로 복원하고, 휴무로
+     * 인해 발급되었던 보강권을 회수한다. 이미 사용해 미래 날짜에 매칭까지 걸어둔 보강권은 그 매칭을
+     * 함께 취소하고 미사용으로 되돌린다(지난 날짜 매칭은 손대지 않는다).
      *
-     * @return 실제로 회수된 보강권 개수
+     * @return 실제로 회수(취소 포함)된 보강권 개수
      */
     @Transactional
     public int deleteHoliday(Long academyId, UUID holidayUuid) {
@@ -116,7 +117,7 @@ public class AcademyHolidayService {
 
         AcademyHoliday holiday = getHolidayOrThrow(holidayUuid, academyId);
 
-        int retractedCount = regularClassService.revertHolidayForSessions(holiday.getAcademy(), holiday.getDate());
+        int retractedCount = regularClassService.revertHolidayForSessions(holiday.getAcademy(), holiday.getDate(), requester);
 
         academyHolidayRepository.delete(holiday);
         return retractedCount;

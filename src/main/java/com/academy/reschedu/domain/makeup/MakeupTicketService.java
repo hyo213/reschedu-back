@@ -14,6 +14,8 @@ import com.academy.reschedu.domain.notification.NotificationEvent;
 import com.academy.reschedu.domain.notification.NotificationType;
 import com.academy.reschedu.domain.regularclass.RegularClass;
 import com.academy.reschedu.domain.regularclass.RegularClassRepository;
+import com.academy.reschedu.domain.regularclass.RegularClassSessionRepository;
+import com.academy.reschedu.domain.regularclass.RegularClassSessionStudentRepository;
 import com.academy.reschedu.domain.regularclass.RegularClassStudentRepository;
 import com.academy.reschedu.global.security.CurrentMemberProvider;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -39,6 +42,8 @@ public class MakeupTicketService {
     private final MakeupRequestRepository makeupRequestRepository;
     private final RegularClassRepository regularClassRepository;
     private final RegularClassStudentRepository regularClassStudentRepository;
+    private final RegularClassSessionRepository regularClassSessionRepository;
+    private final RegularClassSessionStudentRepository regularClassSessionStudentRepository;
     private final AcademyStudentRepository academyStudentRepository;
     private final StudentRepository studentRepository;
     private final CurrentMemberProvider currentMemberProvider;
@@ -364,19 +369,63 @@ public class MakeupTicketService {
     }
 
     /**
-     * 휴무일 지정이 취소될 때, 그 휴무로 발급된 미사용 티켓만 찾아 회수(삭제)한다. 이미 사용된 티켓은 건드리지 않는다.
+     * 휴무일 지정이 취소될 때, 그 휴무로 발급된 티켓을 회수한다.
+     * - 미사용 티켓은 그대로 삭제한다.
+     * - 이미 사용해 다른 반에 보강 매칭까지 걸어둔 티켓이라면, 그 매칭의 대상 날짜가 아직 지나지 않은
+     *   경우에만 매칭을 취소(로스터 제외 + 학부모 알림)하고 티켓을 다시 미사용 상태로 되돌린다
+     *   (MakeupRequest가 이 티켓을 참조하므로 삭제는 불가 — 미사용으로 복원해 다시 쓸 수 있게 한다).
+     *   대상 날짜가 이미 지났으면 실제로 그 수업을 들었을 수 있으므로 손대지 않는다.
      *
-     * @return 실제로 회수했으면 true, 없으면 false
+     * @return 실제로 회수(취소 포함)했으면 true, 없으면 false
      */
     @Transactional
-    public boolean retractHolidayTicketIfUnused(AcademyStudent academyStudent, RegularClass regularClass, LocalDate date) {
-        return makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSourceAndStatus(
-                        regularClass.getId(), academyStudent.getId(), date, MakeupTicketSource.ACADEMY_HOLIDAY, MakeupTicketStatus.UNUSED)
-                .map(ticket -> {
-                    makeupTicketRepository.delete(ticket);
-                    return true;
-                })
-                .orElse(false);
+    public boolean retractHolidayTicket(AcademyStudent academyStudent, RegularClass regularClass, LocalDate date, Member actor) {
+        MakeupTicket ticket = makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSource(
+                        regularClass.getId(), academyStudent.getId(), date, MakeupTicketSource.ACADEMY_HOLIDAY)
+                .orElse(null);
+        if (ticket == null) {
+            return false;
+        }
+
+        if (ticket.getStatus() == MakeupTicketStatus.UNUSED) {
+            makeupTicketRepository.delete(ticket);
+            return true;
+        }
+        if (ticket.getStatus() != MakeupTicketStatus.USED) {
+            return false; // EXPIRED 등은 손대지 않는다.
+        }
+
+        Optional<MakeupRequest> approvedRequest = makeupRequestRepository
+                .findByTicket_IdAndStatus(ticket.getId(), MakeupRequestStatus.APPROVED)
+                .filter(request -> !request.getTargetDate().isBefore(LocalDate.now()));
+        if (approvedRequest.isEmpty()) {
+            return false;
+        }
+
+        MakeupRequest request = approvedRequest.get();
+        regularClassSessionRepository
+                .findByRegularClass_IdAndDate(request.getTargetRegularClass().getId(), request.getTargetDate())
+                .ifPresent(targetSession -> regularClassSessionStudentRepository
+                        .deleteBySession_IdAndAcademyStudent_Id(targetSession.getId(), academyStudent.getId()));
+
+        request.cancel(actor);
+        ticket.cancelUse();
+        notifyParentMatchCancelled(academyStudent);
+        return true;
+    }
+
+    /** 휴무일 취소로 확정된 보강 매칭이 취소되면 그 학생의 학부모에게 실시간 알림(SSE 토스트)을 보낸다. */
+    private void notifyParentMatchCancelled(AcademyStudent academyStudent) {
+        Member parent = academyStudent.getStudent().getParent();
+        if (parent == null) {
+            return;
+        }
+        eventPublisher.publishEvent(NotificationEvent.toMember(
+                NotificationType.MAKEUP_MATCH_CANCELLED,
+                academyStudent.getStudent().getName() + " 학생의 보강 매칭이 휴무일 취소로 인해 자동 취소되었습니다. 보강권은 복원되었습니다.",
+                "/dashboard/makeup-apply",
+                parent.getId()
+        ));
     }
 
     private AcademyStudent getAcademyStudentOrThrow(UUID studentUuid, Long academyId) {

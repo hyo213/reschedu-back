@@ -11,6 +11,9 @@ import com.academy.reschedu.domain.member.Student;
 import com.academy.reschedu.domain.member.StudentRepository;
 import com.academy.reschedu.domain.regularclass.RegularClass;
 import com.academy.reschedu.domain.regularclass.RegularClassRepository;
+import com.academy.reschedu.domain.regularclass.RegularClassSession;
+import com.academy.reschedu.domain.regularclass.RegularClassSessionRepository;
+import com.academy.reschedu.domain.regularclass.RegularClassSessionStudentRepository;
 import com.academy.reschedu.domain.regularclass.RegularClassStudentRepository;
 import com.academy.reschedu.domain.regularclass.RegularClassTimeSlot;
 import com.academy.reschedu.global.security.CurrentMemberProvider;
@@ -54,6 +57,10 @@ class MakeupTicketServiceTest {
     private RegularClassRepository regularClassRepository;
     @Mock
     private RegularClassStudentRepository regularClassStudentRepository;
+    @Mock
+    private RegularClassSessionRepository regularClassSessionRepository;
+    @Mock
+    private RegularClassSessionStudentRepository regularClassSessionStudentRepository;
     @Mock
     private AcademyStudentRepository academyStudentRepository;
     @Mock
@@ -382,6 +389,105 @@ class MakeupTicketServiceTest {
             assertThatThrownBy(() -> makeupTicketService.grantTicketsManually(1L, request))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("소속 학원의 수강생에게만");
+        }
+    }
+
+    @Nested
+    class RetractHolidayTicket {
+
+        @Test
+        void 미사용_티켓이면_삭제하고_true를_반환한다() {
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).originClass(regularClass).absentDate(nextMonday)
+                    .source(MakeupTicketSource.ACADEMY_HOLIDAY).build();
+            when(makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSource(
+                    30L, 40L, nextMonday, MakeupTicketSource.ACADEMY_HOLIDAY)).thenReturn(Optional.of(ticket));
+
+            boolean result = makeupTicketService.retractHolidayTicket(academyStudent, regularClass, nextMonday, parent);
+
+            assertThat(result).isTrue();
+            verify(makeupTicketRepository).delete(ticket);
+        }
+
+        @Test
+        void 발급된_티켓이_없으면_false를_반환한다() {
+            when(makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSource(
+                    30L, 40L, nextMonday, MakeupTicketSource.ACADEMY_HOLIDAY)).thenReturn(Optional.empty());
+
+            boolean result = makeupTicketService.retractHolidayTicket(academyStudent, regularClass, nextMonday, parent);
+
+            assertThat(result).isFalse();
+        }
+
+        @Test
+        void 사용된_티켓이고_매칭_대상날짜가_미래면_매칭을_취소하고_티켓을_복원한다() {
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).originClass(regularClass).absentDate(nextMonday)
+                    .source(MakeupTicketSource.ACADEMY_HOLIDAY).build();
+            ticket.use();
+
+            RegularClass targetClass = RegularClass.builder()
+                    .academy(academy).title("화요반").teacher(regularClass.getTeacher()).maxCapacity(10)
+                    .timeSlots(Set.of(new RegularClassTimeSlot(DayOfWeek.TUESDAY, LocalTime.of(17, 0), LocalTime.of(18, 0))))
+                    .build();
+            ReflectionTestUtils.setField(targetClass, "id", 31L);
+
+            MakeupRequest makeupRequest = MakeupRequest.builder()
+                    .ticket(ticket).targetRegularClass(targetClass).targetDate(nextTuesday).build();
+            makeupRequest.approve(parent);
+
+            RegularClassSession targetSession = RegularClassSession.builder()
+                    .regularClass(targetClass).date(nextTuesday).startTime(LocalTime.of(17, 0)).endTime(LocalTime.of(18, 0))
+                    .maxCapacity(10).holidayCancelled(false).build();
+            ReflectionTestUtils.setField(targetSession, "id", 99L);
+
+            when(makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSource(
+                    30L, 40L, nextMonday, MakeupTicketSource.ACADEMY_HOLIDAY)).thenReturn(Optional.of(ticket));
+            when(makeupRequestRepository.findByTicket_IdAndStatus(ticket.getId(), MakeupRequestStatus.APPROVED))
+                    .thenReturn(Optional.of(makeupRequest));
+            when(regularClassSessionRepository.findByRegularClass_IdAndDate(31L, nextTuesday))
+                    .thenReturn(Optional.of(targetSession));
+
+            boolean result = makeupTicketService.retractHolidayTicket(academyStudent, regularClass, nextMonday, parent);
+
+            assertThat(result).isTrue();
+            assertThat(ticket.getStatus()).isEqualTo(MakeupTicketStatus.UNUSED);
+            assertThat(makeupRequest.getStatus()).isEqualTo(MakeupRequestStatus.CANCELLED);
+            verify(regularClassSessionStudentRepository).deleteBySession_IdAndAcademyStudent_Id(99L, 40L);
+            verify(makeupTicketRepository, never()).delete(any());
+            verify(eventPublisher).publishEvent(any(com.academy.reschedu.domain.notification.NotificationEvent.class));
+        }
+
+        @Test
+        void 사용된_티켓이지만_매칭_대상날짜가_과거면_손대지_않는다() {
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).originClass(regularClass).absentDate(nextMonday)
+                    .source(MakeupTicketSource.ACADEMY_HOLIDAY).build();
+            ticket.use();
+
+            RegularClass targetClass = RegularClass.builder()
+                    .academy(academy).title("화요반").teacher(regularClass.getTeacher()).maxCapacity(10)
+                    .timeSlots(Set.of(new RegularClassTimeSlot(DayOfWeek.TUESDAY, LocalTime.of(17, 0), LocalTime.of(18, 0))))
+                    .build();
+            ReflectionTestUtils.setField(targetClass, "id", 31L);
+
+            LocalDate pastTuesday = nextTuesday.minusWeeks(1);
+            MakeupRequest makeupRequest = MakeupRequest.builder()
+                    .ticket(ticket).targetRegularClass(targetClass).targetDate(pastTuesday).build();
+            makeupRequest.approve(parent);
+
+            when(makeupTicketRepository.findByOriginClass_IdAndAcademyStudent_IdAndAbsentDateAndSource(
+                    30L, 40L, nextMonday, MakeupTicketSource.ACADEMY_HOLIDAY)).thenReturn(Optional.of(ticket));
+            when(makeupRequestRepository.findByTicket_IdAndStatus(ticket.getId(), MakeupRequestStatus.APPROVED))
+                    .thenReturn(Optional.of(makeupRequest));
+
+            boolean result = makeupTicketService.retractHolidayTicket(academyStudent, regularClass, nextMonday, parent);
+
+            assertThat(result).isFalse();
+            assertThat(ticket.getStatus()).isEqualTo(MakeupTicketStatus.USED);
+            assertThat(makeupRequest.getStatus()).isEqualTo(MakeupRequestStatus.APPROVED);
+            verify(regularClassSessionStudentRepository, never()).deleteBySession_IdAndAcademyStudent_Id(any(), any());
+            verify(eventPublisher, never()).publishEvent(any());
         }
     }
 }

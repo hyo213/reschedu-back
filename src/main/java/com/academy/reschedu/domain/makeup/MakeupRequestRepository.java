@@ -19,6 +19,10 @@ public interface MakeupRequestRepository extends JpaRepository<MakeupRequest, Lo
     // 🎯 한 티켓이 동시에 여러 대기/수락 신청에 중복 연결되지 않도록 신청 생성 시 검증하기 위함
     boolean existsByTicket_IdAndStatusIn(Long ticketId, List<MakeupRequestStatus> statuses);
 
+    // 🎯 휴무일 취소 시, 그 휴무 티켓으로 이미 수락된 보강 매칭이 있으면 찾아 취소하기 위함
+    @EntityGraph(attributePaths = {"targetRegularClass"})
+    Optional<MakeupRequest> findByTicket_IdAndStatus(Long ticketId, MakeupRequestStatus status);
+
     // 🎯 같은 날짜에 이미 잡힌 다른 보강 신청과 시간이 겹치는지 검증하기 위함
     @EntityGraph(attributePaths = {"targetRegularClass"})
     List<MakeupRequest> findByTicket_AcademyStudent_IdAndTargetDateAndStatusIn(

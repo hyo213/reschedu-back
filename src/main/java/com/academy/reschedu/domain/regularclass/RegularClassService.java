@@ -428,12 +428,13 @@ public class RegularClassService {
 
     /**
      * 학원 휴무일 지정이 취소될 때 호출. 그 요일의 모든 회차를 정규 상태로 복원하고, 휴무로 발급된
-     * "미사용" 보강권만 회수한다(이미 사용된 티켓은 건드리지 않는다).
+     * 보강권을 회수한다 — 미사용 티켓은 삭제하고, 이미 다른 반에 매칭까지 걸어둔 티켓은 그 매칭의
+     * 대상 날짜가 아직 미래인 경우에 한해 매칭을 취소하고 미사용으로 되돌린다.
      *
-     * @return 실제로 회수된 보강권 개수
+     * @return 실제로 회수(취소 포함)된 보강권 개수
      */
     @Transactional
-    public int revertHolidayForSessions(Academy academy, LocalDate date) {
+    public int revertHolidayForSessions(Academy academy, LocalDate date, Member actor) {
         List<RegularClass> affectedClasses = regularClassRepository.findByAcademyId(academy.getId()).stream()
                 .filter(regularClass -> regularClass.getDaysOfWeek().contains(date.getDayOfWeek()))
                 .toList();
@@ -450,7 +451,7 @@ public class RegularClassService {
             session.revertHolidayCancelled();
 
             for (RegularClassSessionStudent rcss : regularClassSessionStudentRepository.findBySession_Id(session.getId())) {
-                if (makeupTicketService.retractHolidayTicketIfUnused(rcss.getAcademyStudent(), regularClass, date)) {
+                if (makeupTicketService.retractHolidayTicket(rcss.getAcademyStudent(), regularClass, date, actor)) {
                     retractedCount++;
                 }
             }

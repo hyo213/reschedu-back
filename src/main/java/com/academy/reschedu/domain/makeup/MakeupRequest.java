@@ -92,4 +92,14 @@ public class MakeupRequest extends BaseEntity {
         this.decidedBy = decider;
         this.decidedAt = LocalDateTime.now();
     }
+
+    /** 휴무일 지정 취소로 이미 수락된 보강 매칭을 자동 취소한다(로스터 제외/티켓 복원은 서비스 계층 담당). */
+    public void cancel(Member decider) {
+        if (this.status != MakeupRequestStatus.APPROVED) {
+            throw new IllegalStateException("수락된 보강 신청만 취소할 수 있습니다.");
+        }
+        this.status = MakeupRequestStatus.CANCELLED;
+        this.decidedBy = decider;
+        this.decidedAt = LocalDateTime.now();
+    }
 }

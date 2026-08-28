@@ -122,7 +122,7 @@ class AcademyHolidayServiceTest {
             ReflectionTestUtils.setField(holiday, "uuid", holidayUuid);
 
             when(academyHolidayRepository.findByUuidAndAcademyId(holidayUuid, 1L)).thenReturn(Optional.of(holiday));
-            when(regularClassService.revertHolidayForSessions(academy, holidayDate)).thenReturn(2);
+            when(regularClassService.revertHolidayForSessions(academy, holidayDate, admin)).thenReturn(2);
 
             int retracted = academyHolidayService.deleteHoliday(1L, holidayUuid);
 
