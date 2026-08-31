@@ -471,7 +471,7 @@ class MakeupTicketServiceTest {
                     .build();
             ReflectionTestUtils.setField(targetClass, "id", 31L);
 
-            LocalDate pastTuesday = nextTuesday.minusWeeks(1);
+            LocalDate pastTuesday = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previous(DayOfWeek.TUESDAY));
             MakeupRequest makeupRequest = MakeupRequest.builder()
                     .ticket(ticket).targetRegularClass(targetClass).targetDate(pastTuesday).build();
             makeupRequest.approve(parent);
