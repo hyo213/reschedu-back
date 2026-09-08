@@ -9,5 +9,7 @@ public enum NotificationType {
     /** 강사 가입 승인 대기 — 원장 대상 */
     TEACHER_SIGNUP_PENDING,
     /** 수강생(자녀) 등록 승인 대기 — 원장/강사 대상 */
-    STUDENT_ENROLLMENT_PENDING
+    STUDENT_ENROLLMENT_PENDING,
+    /** 보강 신청 접수(수락 대기) — 원장/강사 대상 */
+    MAKEUP_REQUEST_PENDING
 }

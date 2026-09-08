@@ -9,6 +9,8 @@ import com.academy.reschedu.domain.member.Member;
 import com.academy.reschedu.domain.member.MemberRole;
 import com.academy.reschedu.domain.member.Student;
 import com.academy.reschedu.domain.member.StudentRepository;
+import com.academy.reschedu.domain.notification.NotificationEvent;
+import com.academy.reschedu.domain.notification.NotificationType;
 import com.academy.reschedu.domain.regularclass.RegularClass;
 import com.academy.reschedu.domain.regularclass.RegularClassRepository;
 import com.academy.reschedu.domain.regularclass.RegularClassService;
@@ -24,6 +26,7 @@ import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -56,6 +59,7 @@ public class MakeupRequestService {
     private final CurrentMemberProvider currentMemberProvider;
     private final RedissonClient redissonClient;
     private final MeterRegistry meterRegistry;
+    private final ApplicationEventPublisher eventPublisher;
 
     private static final long SLOT_LOCK_WAIT_SECONDS = 3L;
     private static final long SLOT_LOCK_LEASE_SECONDS = 10L;
@@ -91,6 +95,16 @@ public class MakeupRequestService {
                 .targetDate(request.targetDate())
                 .build();
         makeupRequestRepository.save(makeupRequest);
+
+        String studentName = booking.academyStudent().getStudent().getName();
+        eventPublisher.publishEvent(NotificationEvent.toAcademyRoles(
+                NotificationType.MAKEUP_REQUEST_PENDING,
+                studentName + " 학생의 보강 신청이 접수되었습니다.",
+                "/dashboard/makeup-center",
+                booking.targetClass().getAcademy().getId(),
+                List.of(MemberRole.ADMIN, MemberRole.TEACHER)
+        ));
+
         return makeupRequest.getUuid();
     }
 
