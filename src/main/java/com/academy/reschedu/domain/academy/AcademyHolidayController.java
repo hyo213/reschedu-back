@@ -7,7 +7,6 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -72,26 +71,5 @@ public class AcademyHolidayController {
             @RequestParam("academyId") Long academyId) {
         int retractedCount = academyHolidayService.deleteHoliday(academyId, uuid);
         return ResponseEntity.ok(Map.of("retractedTicketCount", retractedCount));
-    }
-
-    // ─── 예외 처리 ──────────────────────────────────────────────────────────
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalStateException(IllegalStateException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidationException(MethodArgumentNotValidException e) {
-        String message = e.getBindingResult().getFieldErrors().stream()
-                .findFirst()
-                .map(error -> error.getDefaultMessage())
-                .orElse("입력값이 올바르지 않습니다.");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
     }
 }

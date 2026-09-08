@@ -236,28 +236,4 @@ public class MemberController {
         memberService.approveMember(uuid);
         return ResponseEntity.ok().build();
     }
-
-    // ─── 예외 처리 ──────────────────────────────────────────────────────────
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalStateException(IllegalStateException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException e) {
-        if (e.getMessage().contains("누락되었습니다")) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
-        }
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", e.getMessage()));
-    }
-
-    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidationException(org.springframework.web.bind.MethodArgumentNotValidException e) {
-        String message = e.getBindingResult().getFieldErrors().stream()
-                .findFirst()
-                .map(error -> error.getDefaultMessage())
-                .orElse("입력값이 올바르지 않습니다.");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
-    }
 }

@@ -1,10 +1,12 @@
 package com.academy.reschedu.domain.academy;
 
+import com.academy.reschedu.domain.academy.dto.AcademyRegisterRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/academies")
@@ -21,14 +23,8 @@ public class AcademyController {
 
     // 신규 학원 자체 등록 API (POST /api/academies/register)
     @PostMapping("/register")
-    public ResponseEntity<?> registerAcademy(@RequestBody Map<String, String> request) {
-        try {
-            String name = request.get("name");
-            String address = request.get("address");
-            Academy newAcademy = academyService.createAcademy(name, address);
-            return ResponseEntity.ok(newAcademy);
-        } catch (Exception e) {
-            return ResponseEntity.status(400).body(e.getMessage());
-        }
+    public ResponseEntity<Academy> registerAcademy(@Valid @RequestBody AcademyRegisterRequest request) {
+        Academy newAcademy = academyService.createAcademy(request.name(), request.address());
+        return ResponseEntity.status(HttpStatus.CREATED).body(newAcademy);
     }
 }

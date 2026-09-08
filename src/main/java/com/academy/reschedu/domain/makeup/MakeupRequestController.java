@@ -8,7 +8,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -92,26 +91,5 @@ public class MakeupRequestController {
     public ResponseEntity<Void> reject(@PathVariable("uuid") UUID uuid, @RequestParam("academyId") Long academyId) {
         makeupRequestService.reject(academyId, uuid);
         return ResponseEntity.noContent().build();
-    }
-
-    // ─── 예외 처리 ──────────────────────────────────────────────────────────
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalStateException(IllegalStateException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidationException(MethodArgumentNotValidException e) {
-        String message = e.getBindingResult().getFieldErrors().stream()
-                .findFirst()
-                .map(error -> error.getDefaultMessage())
-                .orElse("입력값이 올바르지 않습니다.");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
     }
 }
