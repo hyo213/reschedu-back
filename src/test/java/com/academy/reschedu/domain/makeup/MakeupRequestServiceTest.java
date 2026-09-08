@@ -287,9 +287,9 @@ class MakeupRequestServiceTest {
             com.academy.reschedu.domain.regularclass.RegularClassStudent myEnrollment =
                     new com.academy.reschedu.domain.regularclass.RegularClassStudent(myOtherClass, academyStudent);
             when(regularClassStudentRepository.findByAcademyStudent_Id(40L)).thenReturn(List.of(myEnrollment));
-            // 결석 처리되어 있지 않음(그 반에 실제로 참석 예정)
-            when(makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(31L, 40L, targetDate))
-                    .thenReturn(false);
+            // 결석 처리되어 있지 않음(그 반에 실제로 참석 예정) — 그 날짜 결석 티켓이 하나도 없음
+            when(makeupTicketRepository.findByAcademyStudent_IdAndAbsentDate(40L, targetDate))
+                    .thenReturn(List.of());
 
             MakeupRequestCreateRequest request = new MakeupRequestCreateRequest(
                     child.getUuid(), targetClass.getUuid(), targetDate);
@@ -321,8 +321,13 @@ class MakeupRequestServiceTest {
                     new com.academy.reschedu.domain.regularclass.RegularClassStudent(myOtherClass, academyStudent);
             when(regularClassStudentRepository.findByAcademyStudent_Id(40L)).thenReturn(List.of(myEnrollment));
             // 그 반+날짜에 이미 결석 처리(보강권 발급)되어 있음 — 그 시간엔 원래 수업에 안 가므로 충돌이 아니다.
-            when(makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(31L, 40L, targetDate))
-                    .thenReturn(true);
+            MakeupTicket absenceTicket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).originClass(myOtherClass)
+                    .absentDate(targetDate).source(MakeupTicketSource.STUDENT_ABSENCE)
+                    .expiredAt(targetDate.plusMonths(1).atStartOfDay())
+                    .build();
+            when(makeupTicketRepository.findByAcademyStudent_IdAndAbsentDate(40L, targetDate))
+                    .thenReturn(List.of(absenceTicket));
 
             MakeupTicket ticket = unusedTicket();
             when(makeupTicketRepository.findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(40L, MakeupTicketStatus.UNUSED))

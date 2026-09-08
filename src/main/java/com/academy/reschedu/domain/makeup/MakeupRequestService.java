@@ -33,9 +33,12 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -195,6 +198,14 @@ public class MakeupRequestService {
                                              RegularClassSession targetSession, LocalDate targetDate) {
         DayOfWeek dayOfWeek = targetDate.getDayOfWeek();
 
+        // 이 학생의 그 날짜 결석 티켓을 한 번에 조회해두고, 아래 루프에서는 수업별로 다시 쿼리하지 않는다(N+1 회피).
+        Set<Long> absentFromClassIds = makeupTicketRepository.findByAcademyStudent_IdAndAbsentDate(academyStudent.getId(), targetDate)
+                .stream()
+                .map(MakeupTicket::getOriginClass)
+                .filter(Objects::nonNull)
+                .map(RegularClass::getId)
+                .collect(Collectors.toSet());
+
         for (RegularClassStudent enrollment : regularClassStudentRepository.findByAcademyStudent_Id(academyStudent.getId())) {
             RegularClass otherClass = enrollment.getRegularClass();
             if (otherClass.getId().equals(targetClass.getId()) || !enrollment.isActiveOn(targetDate)) {
@@ -205,9 +216,7 @@ public class MakeupRequestService {
                     targetSession.getStartTime(), targetSession.getEndTime())) {
                 continue;
             }
-            boolean absentFromOtherClass = makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(
-                    otherClass.getId(), academyStudent.getId(), targetDate);
-            if (absentFromOtherClass) {
+            if (absentFromClassIds.contains(otherClass.getId())) {
                 continue;
             }
             throw new IllegalStateException(String.format(
@@ -234,9 +243,14 @@ public class MakeupRequestService {
 
     /** 결석 처리된 학생을 제외한, 이 회차에 실제로 출석 예정인 인원 수. */
     private long countAttendingExcludingAbsences(RegularClass targetClass, RegularClassSession session, LocalDate date) {
+        // 회차 인원마다 결석 여부를 개별 쿼리하는 대신, 그 수업·날짜의 결석 티켓을 한 번에 가져와
+        // 메모리에서 걸러낸다(N+1 회피) — 회차 인원 수와 무관하게 쿼리 2번으로 끝난다.
+        Set<Long> absentAcademyStudentIds = makeupTicketRepository.findByOriginClass_IdAndAbsentDate(targetClass.getId(), date)
+                .stream()
+                .map(ticket -> ticket.getAcademyStudent().getId())
+                .collect(Collectors.toSet());
         return regularClassSessionStudentRepository.findBySession_Id(session.getId()).stream()
-                .filter(rcss -> !makeupTicketRepository.existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(
-                        targetClass.getId(), rcss.getAcademyStudent().getId(), date))
+                .filter(rcss -> !absentAcademyStudentIds.contains(rcss.getAcademyStudent().getId()))
                 .count();
     }
 

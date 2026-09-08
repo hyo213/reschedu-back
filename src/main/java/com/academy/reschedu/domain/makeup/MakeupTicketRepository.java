@@ -11,6 +11,10 @@ public interface MakeupTicketRepository extends JpaRepository<MakeupTicket, Long
 
     boolean existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(Long regularClassId, Long academyStudentId, LocalDate absentDate);
 
+    // 🎯 성능 최적화: 일정 충돌 검증 시 수업별로 반복 조회하던 결석 티켓을, 이 학생의 그 날짜 결석 티켓
+    // 전체를 한 번에 가져와 메모리에서 걸러내는 방식으로 대체하기 위함 (N+1 회피)
+    List<MakeupTicket> findByAcademyStudent_IdAndAbsentDate(Long academyStudentId, LocalDate absentDate);
+
     // 🎯 [정규 수업 완전 삭제] 이 반을 결석 사유로 발급된 보강권이 하나라도 있으면 삭제를 막기 위함
     boolean existsByOriginClass_Id(Long regularClassId);
 
