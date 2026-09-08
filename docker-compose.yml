@@ -1,5 +1,9 @@
 services:
   app:
+    # 기본적으로 앱은 IntelliJ/gradle bootRun 등 로컬에서 직접 띄운다.
+    # docker compose up -d 로는 인프라(redis/kafka/prometheus/grafana)만 뜨고,
+    # 앱까지 컨테이너로 돌리고 싶을 때만 `docker compose --profile full up -d --build` 사용.
+    profiles: ["full"]
     build:
       context: .
       dockerfile: Dockerfile
