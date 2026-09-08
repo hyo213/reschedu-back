@@ -8,11 +8,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.redisson.api.RBucket;
+import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.test.util.ReflectionTestUtils;
 
-import java.time.LocalDateTime;
-import java.util.Optional;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -24,7 +24,9 @@ import static org.mockito.Mockito.when;
 class EmailAuthServiceTest {
 
     @Mock
-    private EmailAuthRepository emailAuthRepository;
+    private RedissonClient redissonClient;
+    @Mock
+    private RBucket<String> bucket;
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
@@ -35,18 +37,19 @@ class EmailAuthServiceTest {
     class SendAuthCode {
 
         @Test
-        void 인증코드를_저장하고_이벤트를_발행한다() {
+        void 인증코드를_Redis에_저장하고_이벤트를_발행한다() {
+            when(redissonClient.<String>getBucket("email-auth:user@test.com")).thenReturn(bucket);
+
             emailAuthService.sendAuthCode("user@test.com");
 
-            ArgumentCaptor<EmailAuth> savedCaptor = ArgumentCaptor.forClass(EmailAuth.class);
-            verify(emailAuthRepository).save(savedCaptor.capture());
-            assertThat(savedCaptor.getValue().getEmail()).isEqualTo("user@test.com");
-            assertThat(savedCaptor.getValue().getAuthCode()).matches("\\d{6}");
+            ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
+            verify(bucket).set(codeCaptor.capture(), any(Duration.class));
+            assertThat(codeCaptor.getValue()).matches("\\d{6}");
 
             ArgumentCaptor<AuthCodeRequestedEvent> eventCaptor = ArgumentCaptor.forClass(AuthCodeRequestedEvent.class);
             verify(eventPublisher).publishEvent(eventCaptor.capture());
             assertThat(eventCaptor.getValue().email()).isEqualTo("user@test.com");
-            assertThat(eventCaptor.getValue().authCode()).isEqualTo(savedCaptor.getValue().getAuthCode());
+            assertThat(eventCaptor.getValue().authCode()).isEqualTo(codeCaptor.getValue());
         }
     }
 
@@ -55,9 +58,8 @@ class EmailAuthServiceTest {
 
         @Test
         void 코드가_일치하면_true를_반환한다() {
-            EmailAuth emailAuth = new EmailAuth("user@test.com", "123456", 3);
-            when(emailAuthRepository.findFirstByEmailOrderByExpiredAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(emailAuth));
+            when(redissonClient.<String>getBucket("email-auth:user@test.com")).thenReturn(bucket);
+            when(bucket.get()).thenReturn("123456");
 
             boolean result = emailAuthService.verifyAuthCode("user@test.com", "123456");
 
@@ -66,9 +68,8 @@ class EmailAuthServiceTest {
 
         @Test
         void 코드가_일치하지_않으면_false를_반환한다() {
-            EmailAuth emailAuth = new EmailAuth("user@test.com", "123456", 3);
-            when(emailAuthRepository.findFirstByEmailOrderByExpiredAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(emailAuth));
+            when(redissonClient.<String>getBucket("email-auth:user@test.com")).thenReturn(bucket);
+            when(bucket.get()).thenReturn("123456");
 
             boolean result = emailAuthService.verifyAuthCode("user@test.com", "000000");
 
@@ -76,25 +77,13 @@ class EmailAuthServiceTest {
         }
 
         @Test
-        void 인증_요청_내역이_없으면_예외() {
-            when(emailAuthRepository.findFirstByEmailOrderByExpiredAtDesc("nobody@test.com"))
-                    .thenReturn(Optional.empty());
+        void 인증_요청_내역이_없거나_만료됐으면_예외() {
+            when(redissonClient.<String>getBucket("email-auth:nobody@test.com")).thenReturn(bucket);
+            when(bucket.get()).thenReturn(null);
 
             assertThatThrownBy(() -> emailAuthService.verifyAuthCode("nobody@test.com", "123456"))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("인증 요청 내역이 존재하지 않습니다");
-        }
-
-        @Test
-        void 만료된_코드면_예외() {
-            EmailAuth emailAuth = new EmailAuth("user@test.com", "123456", 3);
-            ReflectionTestUtils.setField(emailAuth, "expiredAt", LocalDateTime.now().minusMinutes(1));
-            when(emailAuthRepository.findFirstByEmailOrderByExpiredAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(emailAuth));
-
-            assertThatThrownBy(() -> emailAuthService.verifyAuthCode("user@test.com", "123456"))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("인증 시간이 만료");
+                    .hasMessageContaining("인증 요청 내역이 없거나 만료되었습니다");
         }
     }
 }
