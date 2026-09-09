@@ -20,14 +20,21 @@ import com.academy.reschedu.domain.regularclass.RegularClassStudentRepository;
 import com.academy.reschedu.global.security.CurrentMemberProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -48,6 +55,7 @@ public class MakeupTicketService {
     private final StudentRepository studentRepository;
     private final CurrentMemberProvider currentMemberProvider;
     private final ApplicationEventPublisher eventPublisher;
+    private final JdbcTemplate jdbcTemplate;
 
     /**
      * 결석 처리(신청). 학부모는 본인 자녀에 대해서만, 원장/강사는 소속 학원의 수강생이라면 누구든 처리할 수 있다.
@@ -175,6 +183,68 @@ public class MakeupTicketService {
         MakeupTicket saved = makeupTicketRepository.save(ticket);
         notifyParentTicketIssued(academyStudent);
         return saved;
+    }
+
+    /**
+     * 휴무일 일괄 발급 전용: 로스터 전체를 대상으로 이미 발급된 학생만 걸러내고 나머지는 JDBC
+     * 배치 INSERT로 한 번에 티켓을 발급한다.
+     * makeup_ticket_id가 IDENTITY 전략이라 Hibernate saveAll()로는 각 INSERT마다 생성된 키를
+     * 동기적으로 받아와야 해 여전히 건별 왕복이 발생한다 — 그래서 이 경로만 JdbcTemplate으로
+     * 우회해 진짜 배치 INSERT를 만든다(대신 UUID/시각은 애플리케이션에서 직접 채운다).
+     */
+    @Transactional
+    public int issueTicketsBulk(RegularClass regularClass, LocalDate date, MakeupTicketSource source,
+                                 List<AcademyStudent> candidates) {
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+
+        Set<Long> alreadyIssued = makeupTicketRepository.findByOriginClass_IdAndAbsentDate(regularClass.getId(), date)
+                .stream()
+                .map(t -> t.getAcademyStudent().getId())
+                .collect(Collectors.toSet());
+        List<AcademyStudent> toIssue = candidates.stream()
+                .filter(s -> !alreadyIssued.contains(s.getId()))
+                .toList();
+        if (toIssue.isEmpty()) {
+            return 0;
+        }
+
+        MakeupTicketPolicy policy = resolvePolicy(regularClass.getAcademy().getId());
+        LocalDateTime expiredAt = resolveExpiredAt(policy, date);
+        LocalDateTime now = LocalDateTime.now();
+
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO makeup_ticket " +
+                        "(uuid, academy_student_id, origin_class_id, absent_date, status, source, expired_at, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                new BatchPreparedStatementSetter() {
+                    @Override
+                    public void setValues(PreparedStatement ps, int i) throws SQLException {
+                        AcademyStudent student = toIssue.get(i);
+                        ps.setObject(1, UUID.randomUUID());
+                        ps.setLong(2, student.getId());
+                        ps.setLong(3, regularClass.getId());
+                        ps.setObject(4, date);
+                        ps.setString(5, MakeupTicketStatus.UNUSED.name());
+                        ps.setString(6, source.name());
+                        if (expiredAt != null) {
+                            ps.setObject(7, expiredAt);
+                        } else {
+                            ps.setNull(7, Types.TIMESTAMP);
+                        }
+                        ps.setObject(8, now);
+                        ps.setObject(9, now);
+                    }
+
+                    @Override
+                    public int getBatchSize() {
+                        return toIssue.size();
+                    }
+                });
+
+        toIssue.forEach(this::notifyParentTicketIssued);
+        return toIssue.size();
     }
 
     /** 보강권이 발급되면 그 학생의 학부모에게 실시간 알림(SSE 토스트)을 보낸다. */

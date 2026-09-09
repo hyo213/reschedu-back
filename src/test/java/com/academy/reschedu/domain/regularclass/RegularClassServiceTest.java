@@ -78,6 +78,8 @@ class RegularClassServiceTest {
     private StudentRepository studentRepository;
     @Mock
     private CurrentMemberProvider currentMemberProvider;
+    @Mock
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private RegularClassService regularClassService;
@@ -411,8 +413,8 @@ class RegularClassServiceTest {
             when(academyHolidayRepository.findByAcademyIdAndDate(1L, monday)).thenReturn(Optional.of(holiday));
             when(regularClassStudentRepository.findByRegularClass_Id(500L))
                     .thenReturn(List.of(new RegularClassStudent(regularClass, student)));
-            when(makeupTicketService.issueTicketIfNeeded(student, regularClass, monday, MakeupTicketSource.ACADEMY_HOLIDAY))
-                    .thenReturn(true);
+            when(makeupTicketService.issueTicketsBulk(regularClass, monday, MakeupTicketSource.ACADEMY_HOLIDAY, List.of(student)))
+                    .thenReturn(1);
 
             int issuedCount = regularClassService.applyHolidayToSessions(academy, monday);
 

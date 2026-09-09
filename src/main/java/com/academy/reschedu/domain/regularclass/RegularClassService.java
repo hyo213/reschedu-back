@@ -34,9 +34,13 @@ import com.academy.reschedu.domain.regularclass.dto.TimeSlotResponse;
 import com.academy.reschedu.domain.regularclass.dto.WeeklyOccurrenceResponse;
 import com.academy.reschedu.global.security.CurrentMemberProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -73,6 +77,7 @@ public class RegularClassService {
     private final MemberRepository memberRepository;
     private final StudentRepository studentRepository;
     private final CurrentMemberProvider currentMemberProvider;
+    private final JdbcTemplate jdbcTemplate;
 
     /** 요일별로 정규 수업을 등록한다. 같은 강사의 동일 요일·시간 수업이 있으면 합류시키고, 없으면 새로 만든다. */
     @Transactional
@@ -486,18 +491,15 @@ public class RegularClassService {
                     .build();
             regularClassSessionRepository.save(session);
 
-            int issuedCount = 0;
             List<RegularClassStudent> templateRoster = regularClassStudentRepository.findByRegularClass_Id(regularClass.getId());
-            for (RegularClassStudent enrollment : templateRoster) {
-                AcademyStudent academyStudent = enrollment.getAcademyStudent();
-                if (!academyStudent.isActiveOn(date) || !enrollment.isActiveOn(date)) {
-                    continue;
-                }
-                regularClassSessionStudentRepository.save(new RegularClassSessionStudent(session, academyStudent, false));
-                if (issueTickets && makeupTicketService.issueTicketIfNeeded(academyStudent, regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY)) {
-                    issuedCount++;
-                }
-            }
+            List<AcademyStudent> activeStudents = templateRoster.stream()
+                    .filter(enrollment -> enrollment.getAcademyStudent().isActiveOn(date) && enrollment.isActiveOn(date))
+                    .map(RegularClassStudent::getAcademyStudent)
+                    .toList();
+            batchInsertSessionStudents(session, activeStudents);
+            int issuedCount = issueTickets
+                    ? makeupTicketService.issueTicketsBulk(regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY, activeStudents)
+                    : 0;
             return new SessionSyncResult(session, issuedCount);
         }
 
@@ -508,13 +510,43 @@ public class RegularClassService {
 
         // 이미 생성된 회차가 뒤늦게 휴무일로 지정된 경우 — 지금 확정하고, 발급 대상이면 즉시 발급한다.
         session.markHolidayCancelled();
-        int issuedCount = 0;
-        for (RegularClassSessionStudent rcss : regularClassSessionStudentRepository.findBySession_Id(session.getId())) {
-            if (issueTickets && makeupTicketService.issueTicketIfNeeded(rcss.getAcademyStudent(), regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY)) {
-                issuedCount++;
-            }
-        }
+        List<AcademyStudent> sessionStudents = regularClassSessionStudentRepository.findBySession_Id(session.getId()).stream()
+                .map(RegularClassSessionStudent::getAcademyStudent)
+                .toList();
+        int issuedCount = issueTickets
+                ? makeupTicketService.issueTicketsBulk(regularClass, date, MakeupTicketSource.ACADEMY_HOLIDAY, sessionStudents)
+                : 0;
         return new SessionSyncResult(session, issuedCount);
+    }
+
+    /**
+     * regular_class_session_student도 IDENTITY 전략이라 JDBC 배치 INSERT로 우회한다.
+     */
+    private void batchInsertSessionStudents(RegularClassSession session, List<AcademyStudent> students) {
+        if (students.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO regular_class_session_student " +
+                        "(session_id, academy_student_id, via_makeup, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, ?)",
+                new BatchPreparedStatementSetter() {
+                    @Override
+                    public void setValues(PreparedStatement ps, int i) throws SQLException {
+                        AcademyStudent student = students.get(i);
+                        ps.setLong(1, session.getId());
+                        ps.setLong(2, student.getId());
+                        ps.setBoolean(3, false);
+                        ps.setObject(4, now);
+                        ps.setObject(5, now);
+                    }
+
+                    @Override
+                    public int getBatchSize() {
+                        return students.size();
+                    }
+                });
     }
 
     private record SessionSyncResult(RegularClassSession session, int issuedTicketCount) {
