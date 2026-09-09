@@ -10,7 +10,7 @@
 
 > 개발자가 로컬에서 실행 중일 때만 아래 ngrok 주소로 접속할 수 있습니다:
 > **https://bronchial-exonerate-antiques.ngrok-free.dev/**
-> (접속되지 않는다면 [실행 방법](#실행-방법)을 참고해주세요.)
+> (접속되지 않는다면 [실행 방법](#실행-방법)을 참고해 주세요)
 
 ## 주요 기능
 
@@ -26,12 +26,12 @@
 ## Redis 분산락 기반 보강 신청 동시성 제어
 
 보강 수업은 잔여석이 한정돼 있는데, 여러 학생이 동시에 신청하면 잔여석 계산의 일관성이 깨져 정원보다 많은
-신청이 승인될 수 있다. 그래서 `makeup-slot:{반UUID}:{날짜}` 키 단위로 Redisson 분산락을 걸고,
-대기(PENDING) 상태도 정원 카운트에 즉시 반영해 초과 신청을 차단했다.
+신청이 승인될 수 있습니다. 그래서 `makeup-slot:{반UUID}:{날짜}` 키 단위로 Redisson 분산락을 걸고,
+대기(PENDING) 상태도 정원 카운트에 즉시 반영해 초과 신청을 차단했습니다.
 
-락을 언제 푸느냐도 문제였다. 트랜잭션이 DB에 최종 커밋되기 전에 락이 해제되면 다른 스레드가 변경 전
-데이터를 읽는다. 트랜잭션 종료 시점이 아니라 DB 커밋이 끝난 뒤 락을 해제하도록(`releaseLockAfterCommit`)
-로직을 옮겼다.
+락을 언제 푸느냐도 문제였습니다. 트랜잭션이 DB에 최종 커밋되기 전에 락이 해제되면 다른 스레드가 변경 전
+데이터를 읽습니다. 트랜잭션 종료 시점이 아니라 DB 커밋이 끝난 뒤 락을 해제하도록(`releaseLockAfterCommit`)
+로직을 옮겼습니다.
 
 ```java
 private void acquireSlotLock(UUID regularClassUuid, LocalDate targetDate) {
@@ -44,28 +44,28 @@ private void acquireSlotLock(UUID regularClassUuid, LocalDate targetDate) {
 
 ### 동시성 검증 테스트 (정원 4석에 10명 동시 신청)
 
-10개 스레드가 동시에 요청하면 정확히 정원 수인 **4건만 성공**하고 나머지 6건은 초과로 실패한다.
+10개 스레드가 동시에 요청하면 정확히 정원 수인 **4건만 성공**하고 나머지 6건은 초과로 실패합니다.
 Testcontainers(Postgres/Redis/Kafka) 기반 통합 테스트(`MakeupRequestConcurrencyIntegrationTest`)라
-CI 파이프라인에서 매 푸시마다 자동으로 돌아간다.
+CI 파이프라인에서 매 푸시마다 자동으로 돌아갑니다.
 
 ---
 
 ## Kafka — 인증 메일 / 실시간 알림
 
-학원 휴무일을 지정하면 그날 수강생 전원에게 보강권이 한꺼번에 발급된다. 이 대량 일괄 발급을 동기로
-처리하면 API가 지연되고 알림이 유실될 위험이 있어 Kafka로 뺐다.
+학원 휴무일을 지정하면 그날 수강생 전원에게 보강권이 한꺼번에 발급됩니다. 이 대량 일괄 발급을 동기로
+처리하면 API가 지연되고 알림이 유실될 위험이 있어 Kafka로 뺐습니다.
 
 인증 메일은 SMTP를 동기 호출하는 만큼 API가 늦어지고, DB가 롤백돼도 이미 나간 메일 때문에 유효하지 않은
-코드가 발송된다. 응답 경로에서 SMTP 발송을 비동기로 분리하고 `@TransactionalEventListener(AFTER_COMMIT)`을
-적용해 커밋이 끝난 뒤에만 Kafka 이벤트를 발행한다.
+코드가 발송됩니다. 응답 경로에서 SMTP 발송을 비동기로 분리하고 `@TransactionalEventListener(AFTER_COMMIT)`을
+적용해 커밋이 끝난 뒤에만 Kafka 이벤트를 발행합니다.
 
-SSE 알림은 다중 인스턴스 환경이 걸림돌이었다. 기본 `groupId`를 쓰면 파티션이 나뉘어 특정 서버에 붙은
-접속자에게만 알림이 간다. 인스턴스별로 고유 `groupId`(`reschedu-notification-{uuid}`)를 동적으로 부여해
-모든 노드가 이벤트를 수신하는 fan-out 구조로 바꿨고, 그래서 접속자 전원에게 브로드캐스팅된다.
+SSE 알림은 다중 인스턴스 환경이 걸림돌이었습니다. 기본 `groupId`를 쓰면 파티션이 나뉘어 특정 서버에 붙은
+접속자에게만 알림이 갑니다. 인스턴스별로 고유 `groupId`(`reschedu-notification-{uuid}`)를 동적으로 부여해
+모든 노드가 이벤트를 수신하는 fan-out 구조로 바꿨고, 그래서 접속자 전원에게 브로드캐스팅됩니다.
 
 ### 부하 테스트 실측 지표 (휴무일 보강권 100건 동시 발급)
 
-`NotificationBulkLoadTest`(Testcontainers 기반, 실제 SSE 연결 100개 + 실제 HTTP 요청)로 직접 측정했다.
+`NotificationBulkLoadTest`(Testcontainers 기반, 실제 SSE 연결 100개 + 실제 HTTP 요청)로 직접 측정했습니다.
 
 - **API 응답 속도** `385.7ms` (티켓/세션-학생 INSERT를 `JdbcTemplate` 배치로 처리해 100건 개별 INSERT 대비 단축)
 - **알림 수신 지연** API 응답 후 평균 `48.5ms` 내 실시간 전달
@@ -75,20 +75,20 @@ SSE 알림은 다중 인스턴스 환경이 걸림돌이었다. 기본 `groupId`
 
 ## CORS 와일드카드와 자격증명 취약점 해결
 
-로컬 터널(ngrok)로 테스트하는 환경이라 CORS 설정에서 생길 수 있는 보안 취약점을 미리 차단해야 했다.
+로컬 터널(ngrok)로 테스트하는 환경이라 CORS 설정에서 생길 수 있는 보안 취약점을 미리 차단해야 했습니다.
 
 먼저 Origin 검증. 브라우저는 요청에 `Origin` 헤더를 자동으로 붙이는데(`curl`은 안 붙임), 서버가 이 헤더를
-허용 목록과 대조해 403으로 차단했다. 환경 변수로 테스트용 Origin을 유연하게 등록할 수 있도록 구조를 바꿨다.
+허용 목록과 대조해 403으로 차단했습니다. 환경 변수로 테스트용 Origin을 유연하게 등록할 수 있도록 구조를 바꿨습니다.
 
 ```java
 @Value("${app.cors.extra-allowed-origins:}")
 private String extraAllowedOrigins; // 환경 변수로 정확한 Origin만 콤마(,) 구분 주입
 ```
 
-그 다음은 자격증명 탈취 위험이다. 와일드카드(`*.ngrok-free.dev`)를 허용하면 `allowCredentials(true)`
-환경에서 공격자 도메인까지 신뢰되어 쿠키가 노출된다. 와일드카드는 전면 배제하고 **검증된 정확한 Origin만
-명시적 화이트리스트로 관리**한다. `curl` 통과가 브라우저 보안 정책 통과를 보장하지 않고,
-`allowCredentials(true)`를 쓰는 한 와일드카드(`*`) Origin은 엄격히 제한해야 한다는 걸 여기서 배웠다.
+그 다음은 자격증명 탈취 위험입니다. 와일드카드(`*.ngrok-free.dev`)를 허용하면 `allowCredentials(true)`
+환경에서 공격자 도메인까지 신뢰되어 쿠키가 노출됩니다. 와일드카드는 전면 배제하고 **검증된 정확한 Origin만
+명시적 화이트리스트로 관리**합니다. `curl` 통과가 브라우저 보안 정책 통과를 보장하지 않고,
+`allowCredentials(true)`를 쓰는 한 와일드카드(`*`) Origin은 엄격히 제한해야 한다는 걸 여기서 배웠습니다.
 
 ---
 
