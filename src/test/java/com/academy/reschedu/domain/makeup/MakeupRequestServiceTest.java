@@ -25,6 +25,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.DayOfWeek;
@@ -67,6 +68,8 @@ class MakeupRequestServiceTest {
     private CurrentMemberProvider currentMemberProvider;
     @Mock
     private RedissonClient redissonClient;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
     @org.mockito.Spy
     private io.micrometer.core.instrument.MeterRegistry meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
 
