@@ -13,6 +13,7 @@ import com.academy.reschedu.global.security.CurrentMemberProvider;
 import com.academy.reschedu.global.security.LoginAttemptService;
 import com.academy.reschedu.global.security.jwt.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,16 @@ public class MemberService {
     private final EnrollmentPeriodHistoryRepository enrollmentPeriodHistoryRepository;
     private final LoginAttemptService loginAttemptService;
     private final ApplicationEventPublisher eventPublisher;
+
+    // 데모 사이트 체험 로그인용 고정 계정. 아이디/비밀번호를 프론트에 내려보내지 않고 역할로만 골라 로그인시킨다.
+    @Value("${app.demo.admin-email:test1@test.com}")
+    private String demoAdminEmail;
+
+    @Value("${app.demo.teacher-email:test1t@test.com}")
+    private String demoTeacherEmail;
+
+    @Value("${app.demo.parent-email:test1p@test.com}")
+    private String demoParentEmail;
 
     @Transactional
     public UUID signUp(SignUpRequest request) {
@@ -138,6 +149,30 @@ public class MemberService {
         String accessToken = jwtTokenProvider.createAccessToken(tokenSubject, member.getRole());
 
         return new LoginResult(LoginResponse.of(member), accessToken);
+    }
+
+    /** 데모 사이트 체험 로그인: 아이디/비밀번호 없이 역할만으로 미리 정해둔 데모 계정에 로그인시킨다. */
+    public LoginResult demoLogin(MemberRole role) {
+        String demoEmail = resolveDemoEmail(role);
+
+        Member member = memberRepository.findByEmail(demoEmail)
+                .orElseThrow(() -> new IllegalStateException("데모 계정이 아직 준비되지 않았습니다."));
+
+        String accessToken = jwtTokenProvider.createAccessToken(member.getEmail(), member.getRole());
+        return new LoginResult(LoginResponse.of(member), accessToken);
+    }
+
+    private String resolveDemoEmail(MemberRole role) {
+        return switch (role) {
+            case ADMIN -> demoAdminEmail;
+            case TEACHER -> demoTeacherEmail;
+            case PARENT -> demoParentEmail;
+        };
+    }
+
+    private boolean isDemoAccount(String email) {
+        return email != null
+                && (email.equals(demoAdminEmail) || email.equals(demoTeacherEmail) || email.equals(demoParentEmail));
     }
 
     @Transactional
@@ -347,6 +382,10 @@ public class MemberService {
     @Transactional
     public void updateMyProfile(MyProfileUpdateRequest request) {
         Member member = currentMemberProvider.getCurrentMember();
+
+        if (isDemoAccount(member.getEmail())) {
+            throw new IllegalStateException("데모 계정은 정보를 수정할 수 없습니다.");
+        }
 
         String newPhone = request.phone().trim();
         if (!newPhone.equals(member.getPhone()) && memberRepository.existsByPhone(newPhone)) {

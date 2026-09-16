@@ -64,6 +64,14 @@ public class MemberController {
         return ResponseEntity.ok(result.profile());
     }
 
+    /** 데모 사이트 체험 로그인: 아이디/비밀번호 입력 없이 역할만 골라 미리 준비된 데모 계정으로 로그인한다. */
+    @PostMapping("/demo-login")
+    public ResponseEntity<LoginResponse> demoLogin(@Valid @RequestBody DemoLoginRequest request, HttpServletResponse response) {
+        LoginResult result = memberService.demoLogin(request.role());
+        response.addHeader(HttpHeaders.SET_COOKIE, jwtCookieProvider.createAccessTokenCookie(result.accessToken()).toString());
+        return ResponseEntity.ok(result.profile());
+    }
+
     /**
      * 마이페이지: 로그인한 본인의 계정 정보 조회 (수정 화면 Pre-fill용)
      * GET /api/members/me

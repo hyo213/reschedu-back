@@ -71,6 +71,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/members/signup",
                                 "/api/members/login",
+                                "/api/members/demo-login",
                                 "/api/members/check-email",
                                 "/api/members/email-auth/**",
                                 "/api/members/logout",
