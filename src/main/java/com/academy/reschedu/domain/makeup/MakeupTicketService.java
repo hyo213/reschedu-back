@@ -364,6 +364,37 @@ public class MakeupTicketService {
     }
 
     /**
+     * 원장/강사 전용: 지급된 보강권을 삭제한다. 이미 사용됐거나(USED) 어떤 보강 신청(대기/수락/거절/취소
+     * 이력 포함)에든 한 번이라도 연결된 티켓은 삭제할 수 없다 — ticket_id가 NOT NULL FK라 참조가 남아있는
+     * 채로 지우면 무결성 제약을 위반하고, USED 티켓은 실제로 편성/보강권 이력의 근거이므로 지우면 안 된다.
+     */
+    @Transactional
+    public void deleteTicketManually(Long academyId, UUID ticketUuid) {
+        Member requester = currentMemberProvider.getCurrentMember();
+        if (requester.getRole() != MemberRole.ADMIN && requester.getRole() != MemberRole.TEACHER) {
+            throw new IllegalStateException("원장/강사만 보강권을 삭제할 수 있습니다.");
+        }
+        if (requester.getAcademy() == null || !requester.getAcademy().getId().equals(academyId)) {
+            throw new IllegalStateException("소속 학원의 보강권만 삭제할 수 있습니다.");
+        }
+
+        MakeupTicket ticket = makeupTicketRepository.findByUuid(ticketUuid)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 보강권입니다."));
+        if (!ticket.getAcademyStudent().getAcademy().getId().equals(academyId)) {
+            throw new IllegalStateException("소속 학원의 보강권만 삭제할 수 있습니다.");
+        }
+
+        if (ticket.getStatus() == MakeupTicketStatus.USED) {
+            throw new IllegalStateException("이미 사용된 보강권은 삭제할 수 없습니다.");
+        }
+        if (makeupRequestRepository.existsByTicket_Id(ticket.getId())) {
+            throw new IllegalStateException("보강 신청 이력이 연결된 보강권은 삭제할 수 없습니다.");
+        }
+
+        makeupTicketRepository.delete(ticket);
+    }
+
+    /**
      * 보강 매칭 센터용: 학원 소속 전체 수강생의 잔여(미사용) 보강권 개수를 집계한다.
      */
     public List<StudentTicketCountResponse> getRemainingTicketCounts(Long academyId) {

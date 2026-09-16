@@ -490,4 +490,107 @@ class MakeupTicketServiceTest {
             verify(eventPublisher, never()).publishEvent(any());
         }
     }
+
+    @Nested
+    class DeleteTicketManually {
+
+        @Test
+        void 미사용이고_신청이력이_없으면_삭제된다() {
+            Member teacher = regularClass.getTeacher();
+            UUID ticketUuid = UUID.randomUUID();
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).source(MakeupTicketSource.MANUAL_GRANT).build();
+
+            when(currentMemberProvider.getCurrentMember()).thenReturn(teacher);
+            when(makeupTicketRepository.findByUuid(ticketUuid)).thenReturn(Optional.of(ticket));
+            when(makeupRequestRepository.existsByTicket_Id(ticket.getId())).thenReturn(false);
+
+            makeupTicketService.deleteTicketManually(1L, ticketUuid);
+
+            verify(makeupTicketRepository).delete(ticket);
+        }
+
+        @Test
+        void 학부모가_시도하면_예외() {
+            UUID ticketUuid = UUID.randomUUID();
+            when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
+
+            assertThatThrownBy(() -> makeupTicketService.deleteTicketManually(1L, ticketUuid))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("원장/강사만");
+
+            verify(makeupTicketRepository, never()).delete(any());
+        }
+
+        @Test
+        void 다른_학원_소속_티켓이면_예외() {
+            Member teacher = regularClass.getTeacher();
+            UUID ticketUuid = UUID.randomUUID();
+
+            Academy otherAcademy = Academy.builder().name("다른 학원").build();
+            ReflectionTestUtils.setField(otherAcademy, "id", 2L);
+            AcademyStudent otherAcademyStudent = new AcademyStudent(
+                    otherAcademy, child, "아이", null, true, null, null, null, null, null);
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(otherAcademyStudent).source(MakeupTicketSource.MANUAL_GRANT).build();
+
+            when(currentMemberProvider.getCurrentMember()).thenReturn(teacher);
+            when(makeupTicketRepository.findByUuid(ticketUuid)).thenReturn(Optional.of(ticket));
+
+            assertThatThrownBy(() -> makeupTicketService.deleteTicketManually(1L, ticketUuid))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("소속 학원");
+
+            verify(makeupTicketRepository, never()).delete(any());
+        }
+
+        @Test
+        void 이미_사용된_티켓이면_예외() {
+            Member teacher = regularClass.getTeacher();
+            UUID ticketUuid = UUID.randomUUID();
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).source(MakeupTicketSource.MANUAL_GRANT).build();
+            ticket.use();
+
+            when(currentMemberProvider.getCurrentMember()).thenReturn(teacher);
+            when(makeupTicketRepository.findByUuid(ticketUuid)).thenReturn(Optional.of(ticket));
+
+            assertThatThrownBy(() -> makeupTicketService.deleteTicketManually(1L, ticketUuid))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("이미 사용된");
+
+            verify(makeupTicketRepository, never()).delete(any());
+        }
+
+        @Test
+        void 보강_신청_이력이_연결되어_있으면_예외() {
+            Member teacher = regularClass.getTeacher();
+            UUID ticketUuid = UUID.randomUUID();
+            MakeupTicket ticket = MakeupTicket.builder()
+                    .academyStudent(academyStudent).source(MakeupTicketSource.STUDENT_ABSENCE).build();
+
+            when(currentMemberProvider.getCurrentMember()).thenReturn(teacher);
+            when(makeupTicketRepository.findByUuid(ticketUuid)).thenReturn(Optional.of(ticket));
+            when(makeupRequestRepository.existsByTicket_Id(ticket.getId())).thenReturn(true);
+
+            assertThatThrownBy(() -> makeupTicketService.deleteTicketManually(1L, ticketUuid))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("신청 이력");
+
+            verify(makeupTicketRepository, never()).delete(any());
+        }
+
+        @Test
+        void 존재하지_않는_티켓이면_예외() {
+            Member teacher = regularClass.getTeacher();
+            UUID ticketUuid = UUID.randomUUID();
+
+            when(currentMemberProvider.getCurrentMember()).thenReturn(teacher);
+            when(makeupTicketRepository.findByUuid(ticketUuid)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> makeupTicketService.deleteTicketManually(1L, ticketUuid))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("존재하지 않는");
+        }
+    }
 }

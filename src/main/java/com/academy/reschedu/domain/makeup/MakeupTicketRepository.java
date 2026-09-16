@@ -6,8 +6,12 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 public interface MakeupTicketRepository extends JpaRepository<MakeupTicket, Long> {
+
+    // 🎯 [보강권 관리] 원장/강사가 특정 보강권을 삭제할 때 uuid로 조회하기 위함
+    Optional<MakeupTicket> findByUuid(UUID uuid);
 
     boolean existsByOriginClass_IdAndAcademyStudent_IdAndAbsentDate(Long regularClassId, Long academyStudentId, LocalDate absentDate);
 

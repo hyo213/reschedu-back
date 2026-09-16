@@ -42,6 +42,18 @@ public class MakeupTicketController {
     }
 
     /**
+     * 원장/강사용: 보강권 관리 - 지급된 보강권 삭제 (사용됐거나 신청 이력이 연결된 티켓은 삭제 불가)
+     * DELETE /api/makeup-tickets/{ticketUuid}?academyId=1
+     */
+    @DeleteMapping("/{ticketUuid}")
+    public ResponseEntity<Void> deleteTicket(
+            @PathVariable("ticketUuid") UUID ticketUuid,
+            @RequestParam("academyId") Long academyId) {
+        makeupTicketService.deleteTicketManually(academyId, ticketUuid);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * 원장/강사용: 보강 매칭 센터 - 학생별 잔여 보강권 개수 조회
      * GET /api/makeup-tickets/counts?academyId=1
      */
