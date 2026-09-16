@@ -48,9 +48,11 @@ public class MakeupTicketPolicyService {
                     .maxOutstandingTickets(request.maxOutstandingTickets())
                     .monthlyIssueLimit(request.monthlyIssueLimit())
                     .defaultValidityDays(request.defaultValidityDays())
+                    .allowUseAfterEnrollmentExpired(request.allowUseAfterEnrollmentExpired())
                     .build();
         } else {
-            policy.update(request.maxOutstandingTickets(), request.monthlyIssueLimit(), request.defaultValidityDays());
+            policy.update(request.maxOutstandingTickets(), request.monthlyIssueLimit(), request.defaultValidityDays(),
+                    request.allowUseAfterEnrollmentExpired());
         }
         makeupTicketPolicyRepository.save(policy);
         return MakeupTicketPolicyResponse.from(policy);

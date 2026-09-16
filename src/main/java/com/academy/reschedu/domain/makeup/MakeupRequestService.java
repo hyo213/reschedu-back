@@ -50,6 +50,7 @@ public class MakeupRequestService {
 
     private final MakeupRequestRepository makeupRequestRepository;
     private final MakeupTicketRepository makeupTicketRepository;
+    private final MakeupTicketPolicyRepository makeupTicketPolicyRepository;
     private final RegularClassRepository regularClassRepository;
     private final RegularClassSessionStudentRepository regularClassSessionStudentRepository;
     private final RegularClassStudentRepository regularClassStudentRepository;
@@ -158,6 +159,12 @@ public class MakeupRequestService {
                 .findByStudentUuidAndAcademyId(request.studentUuid(), targetClass.getAcademy().getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 학원에 등록되지 않은 수강생입니다."));
 
+        // 수강 기간이 끝난 학생도 남은 보강권을 계속 쓸 수 있을지는 학원 정책(MakeupTicketPolicy)에 달렸다
+        // — 기본값은 허용이며, 정책 행이 없는 학원은 항상 허용이다.
+        if (academyStudent.isExpired(LocalDate.now()) && !isPostExpiryUseAllowed(targetClass.getAcademy().getId())) {
+            throw new IllegalStateException("수강 기간이 만료된 학생은 이 학원 정책상 보강권을 사용할 수 없습니다.");
+        }
+
         if (!targetClass.getDaysOfWeek().contains(request.targetDate().getDayOfWeek())) {
             throw new IllegalArgumentException("지정한 날짜는 해당 수업의 정규 요일이 아닙니다.");
         }
@@ -197,6 +204,12 @@ public class MakeupRequestService {
                 .orElseThrow(() -> new IllegalStateException("사용 가능한 보강권이 없습니다."));
 
         return new PreparedBooking(ticket, targetClass, targetSession, academyStudent);
+    }
+
+    private boolean isPostExpiryUseAllowed(Long academyId) {
+        return makeupTicketPolicyRepository.findByAcademy_Id(academyId)
+                .map(MakeupTicketPolicy::isAllowUseAfterEnrollmentExpired)
+                .orElse(true);
     }
 
     private record PreparedBooking(MakeupTicket ticket, RegularClass targetClass,

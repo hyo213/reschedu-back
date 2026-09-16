@@ -44,17 +44,25 @@ public class MakeupTicketPolicy extends BaseEntity {
     @Column(name = "default_validity_days")
     private Integer defaultValidityDays;
 
+    /** 수강 기간이 끝난 학생도 남은 보강권(자체 유효기간 이내)을 계속 쓸 수 있게 할지. 기본값 true(허용). */
+    @Column(name = "allow_use_after_enrollment_expired", nullable = false, columnDefinition = "boolean default true")
+    private boolean allowUseAfterEnrollmentExpired = true;
+
     @Builder
-    private MakeupTicketPolicy(Academy academy, Integer maxOutstandingTickets, Integer monthlyIssueLimit, Integer defaultValidityDays) {
+    private MakeupTicketPolicy(Academy academy, Integer maxOutstandingTickets, Integer monthlyIssueLimit,
+                                Integer defaultValidityDays, Boolean allowUseAfterEnrollmentExpired) {
         this.academy = academy;
         this.maxOutstandingTickets = maxOutstandingTickets;
         this.monthlyIssueLimit = monthlyIssueLimit;
         this.defaultValidityDays = defaultValidityDays;
+        this.allowUseAfterEnrollmentExpired = allowUseAfterEnrollmentExpired == null || allowUseAfterEnrollmentExpired;
     }
 
-    public void update(Integer maxOutstandingTickets, Integer monthlyIssueLimit, Integer defaultValidityDays) {
+    public void update(Integer maxOutstandingTickets, Integer monthlyIssueLimit, Integer defaultValidityDays,
+                        boolean allowUseAfterEnrollmentExpired) {
         this.maxOutstandingTickets = maxOutstandingTickets;
         this.monthlyIssueLimit = monthlyIssueLimit;
         this.defaultValidityDays = defaultValidityDays;
+        this.allowUseAfterEnrollmentExpired = allowUseAfterEnrollmentExpired;
     }
 }

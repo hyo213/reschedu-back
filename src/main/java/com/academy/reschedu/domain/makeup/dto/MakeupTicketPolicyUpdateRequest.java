@@ -11,5 +11,8 @@ public record MakeupTicketPolicyUpdateRequest(
         Integer monthlyIssueLimit,
 
         @Min(value = 1, message = "유효 기간은 1일 이상이어야 합니다.")
-        Integer defaultValidityDays
+        Integer defaultValidityDays,
+
+        /** 수강 기간이 끝난 학생도 남은 보강권을 계속 쓸 수 있게 할지. */
+        boolean allowUseAfterEnrollmentExpired
 ) {}

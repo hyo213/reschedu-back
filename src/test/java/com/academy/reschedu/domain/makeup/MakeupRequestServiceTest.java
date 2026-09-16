@@ -53,6 +53,8 @@ class MakeupRequestServiceTest {
     @Mock
     private MakeupTicketRepository makeupTicketRepository;
     @Mock
+    private MakeupTicketPolicyRepository makeupTicketPolicyRepository;
+    @Mock
     private RegularClassRepository regularClassRepository;
     @Mock
     private RegularClassSessionStudentRepository regularClassSessionStudentRepository;
@@ -174,6 +176,50 @@ class MakeupRequestServiceTest {
             MakeupRequestCreateRequest request = new MakeupRequestCreateRequest(
                     child.getUuid(), targetClass.getUuid(), targetDate);
             makeupRequestService.createRequest(request);
+        }
+
+        @Test
+        void 정책이_만료후_사용을_막았고_수강기간이_만료됐으면_예외() {
+            academyStudent.updateEnrollmentPeriod(LocalDate.now().minusMonths(3), LocalDate.now().minusDays(10));
+            MakeupTicketPolicy policy = MakeupTicketPolicy.builder()
+                    .academy(academy).allowUseAfterEnrollmentExpired(false).build();
+            when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
+            when(studentRepository.findByUuid(child.getUuid())).thenReturn(java.util.Optional.of(child));
+            when(regularClassRepository.findByUuid(targetClass.getUuid())).thenReturn(java.util.Optional.of(targetClass));
+            when(academyStudentRepository.findByStudentUuidAndAcademyId(child.getUuid(), 1L))
+                    .thenReturn(java.util.Optional.of(academyStudent));
+            when(makeupTicketPolicyRepository.findByAcademy_Id(1L)).thenReturn(java.util.Optional.of(policy));
+
+            MakeupRequestCreateRequest request = new MakeupRequestCreateRequest(
+                    child.getUuid(), targetClass.getUuid(), targetDate);
+
+            assertThatThrownBy(() -> makeupRequestService.createRequest(request))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("정책상 보강권을 사용할 수 없습니다");
+        }
+
+        @Test
+        void 정책_행이_없으면_수강기간이_만료된_학생도_기본적으로_보강권을_사용할_수_있다() {
+            academyStudent.updateEnrollmentPeriod(LocalDate.now().minusMonths(3), LocalDate.now().minusDays(10));
+            when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
+            when(studentRepository.findByUuid(child.getUuid())).thenReturn(java.util.Optional.of(child));
+            when(regularClassRepository.findByUuid(targetClass.getUuid())).thenReturn(java.util.Optional.of(targetClass));
+            when(academyStudentRepository.findByStudentUuidAndAcademyId(child.getUuid(), 1L))
+                    .thenReturn(java.util.Optional.of(academyStudent));
+            when(makeupTicketPolicyRepository.findByAcademy_Id(1L)).thenReturn(java.util.Optional.empty());
+            when(regularClassService.ensureSessionForMakeupBooking(targetClass, targetDate)).thenReturn(targetSession);
+            when(regularClassSessionStudentRepository.existsBySession_IdAndAcademyStudent_Id(50L, 40L)).thenReturn(false);
+            when(regularClassSessionStudentRepository.findBySession_Id(50L)).thenReturn(List.of());
+            MakeupTicket ticket = unusedTicket();
+            when(makeupTicketRepository.findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(40L, MakeupTicketStatus.UNUSED))
+                    .thenReturn(List.of(ticket));
+            when(makeupRequestRepository.existsByTicket_IdAndStatusIn(eq(60L), any())).thenReturn(false);
+            when(makeupRequestRepository.save(any(MakeupRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            MakeupRequestCreateRequest request = new MakeupRequestCreateRequest(
+                    child.getUuid(), targetClass.getUuid(), targetDate);
+
+            makeupRequestService.createRequest(request); // 예외 없이 정상 처리돼야 한다
         }
 
         @Test

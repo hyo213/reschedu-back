@@ -63,6 +63,7 @@ class MakeupTicketPolicyServiceTest {
             assertThat(response.maxOutstandingTickets()).isNull();
             assertThat(response.monthlyIssueLimit()).isNull();
             assertThat(response.defaultValidityDays()).isNull();
+            assertThat(response.allowUseAfterEnrollmentExpired()).isTrue(); // 정책 행이 없으면 기본값(허용)
         }
 
         @Test
@@ -88,36 +89,39 @@ class MakeupTicketPolicyServiceTest {
             when(academyRepository.findById(1L)).thenReturn(Optional.of(academy));
             when(makeupTicketPolicyRepository.save(any(MakeupTicketPolicy.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            MakeupTicketPolicyUpdateRequest request = new MakeupTicketPolicyUpdateRequest(5, 3, 60);
+            MakeupTicketPolicyUpdateRequest request = new MakeupTicketPolicyUpdateRequest(5, 3, 60, false);
             MakeupTicketPolicyResponse response = makeupTicketPolicyService.updatePolicy(1L, request);
 
             assertThat(response.maxOutstandingTickets()).isEqualTo(5);
             assertThat(response.monthlyIssueLimit()).isEqualTo(3);
             assertThat(response.defaultValidityDays()).isEqualTo(60);
+            assertThat(response.allowUseAfterEnrollmentExpired()).isFalse();
         }
 
         @Test
         void 이미_정책이_있으면_값을_갱신한다() {
             MakeupTicketPolicy existing = MakeupTicketPolicy.builder()
                     .academy(academy).maxOutstandingTickets(2).monthlyIssueLimit(1).defaultValidityDays(30)
+                    .allowUseAfterEnrollmentExpired(true)
                     .build();
             lenient().when(currentMemberProvider.getCurrentMember()).thenReturn(admin);
             when(makeupTicketPolicyRepository.findByAcademy_Id(1L)).thenReturn(Optional.of(existing));
             when(makeupTicketPolicyRepository.save(any(MakeupTicketPolicy.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            MakeupTicketPolicyUpdateRequest request = new MakeupTicketPolicyUpdateRequest(null, null, null);
+            MakeupTicketPolicyUpdateRequest request = new MakeupTicketPolicyUpdateRequest(null, null, null, false);
             MakeupTicketPolicyResponse response = makeupTicketPolicyService.updatePolicy(1L, request);
 
             assertThat(response.maxOutstandingTickets()).isNull();
             assertThat(response.monthlyIssueLimit()).isNull();
             assertThat(response.defaultValidityDays()).isNull();
+            assertThat(response.allowUseAfterEnrollmentExpired()).isFalse();
         }
 
         @Test
         void 강사는_정책을_변경할_수_없다() {
             lenient().when(currentMemberProvider.getCurrentMember()).thenReturn(teacher);
 
-            MakeupTicketPolicyUpdateRequest request = new MakeupTicketPolicyUpdateRequest(5, 3, 60);
+            MakeupTicketPolicyUpdateRequest request = new MakeupTicketPolicyUpdateRequest(5, 3, 60, true);
 
             assertThatThrownBy(() -> makeupTicketPolicyService.updatePolicy(1L, request))
                     .isInstanceOf(IllegalStateException.class)
