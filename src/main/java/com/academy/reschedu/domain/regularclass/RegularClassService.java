@@ -1032,7 +1032,7 @@ public class RegularClassService {
                 ? regularClassRepository.findByAcademyIdAndTeacher_Uuid(academyId, teacherUuid)
                 : regularClassRepository.findByAcademyId(academyId);
 
-        return findNextOccurrence(candidates);
+        return findNextOccurrence(candidates, null);
     }
 
     /** 학부모 대시보드용: 본인 자녀가 편성된 시간표 중 가장 가까운 다가오는 회차. */
@@ -1051,16 +1051,26 @@ public class RegularClassService {
             distinctClasses.putIfAbsent(enrollment.getRegularClass().getId(), enrollment.getRegularClass());
         }
 
-        return findNextOccurrence(new ArrayList<>(distinctClasses.values()));
+        Set<UUID> myChildrenUuids = studentRepository.findByParentId(parent.getId()).stream()
+                .map(Student::getUuid)
+                .collect(Collectors.toSet());
+
+        return findNextOccurrence(new ArrayList<>(distinctClasses.values()), myChildrenUuids);
     }
 
-    /** 후보 시간표 중 지금 이후로 가장 이르게 시작하는, 유효 수강생이 있는 회차를 찾는다. 휴무일/공백 회차는 건너뛴다. */
-    private Optional<NextClassResponse> findNextOccurrence(List<RegularClass> candidates) {
+    /**
+     * 후보 시간표 중 지금 이후로 가장 이르게 시작하는, (제한이 있다면) 그 안에 유효 수강생이 있는 회차를
+     * 찾는다. 휴무일/공백 회차는 건너뛴다.
+     * @param restrictToStudentUuids null이면 원장/강사용(전체 로스터 노출), 값이 있으면 학부모용 —
+     *                               다른 수강생 이름이 노출되지 않도록 그 집합에 속한 학생만 걸러서 보여준다.
+     */
+    private Optional<NextClassResponse> findNextOccurrence(List<RegularClass> candidates, Set<UUID> restrictToStudentUuids) {
         LocalDateTime now = LocalDateTime.now();
 
         RegularClass bestClass = null;
         RegularClassSession bestSession = null;
         LocalDateTime bestStart = null;
+        List<RegularClassSessionStudent> bestRoster = null;
 
         for (RegularClass regularClass : candidates) {
             for (int offset = 0; offset <= NEXT_CLASS_LOOKAHEAD_DAYS; offset++) {
@@ -1080,15 +1090,23 @@ public class RegularClassService {
                 }
 
                 RegularClassSession session = ensureSession(regularClass, date);
-                boolean hasAttendees = !regularClassSessionStudentRepository.findBySession_Id(session.getId()).isEmpty();
-                if (!hasAttendees) {
-                    continue; // 유효 수강생이 없는 회차는 "다음 수업"으로 보여줄 의미가 없다.
+                List<RegularClassSessionStudent> roster = regularClassSessionStudentRepository.findBySession_Id(session.getId());
+                List<RegularClassSessionStudent> visibleRoster = restrictToStudentUuids == null
+                        ? roster
+                        : roster.stream()
+                                .filter(rcss -> restrictToStudentUuids.contains(rcss.getAcademyStudent().getStudent().getUuid()))
+                                .toList();
+                if (visibleRoster.isEmpty()) {
+                    // 학부모 입장에서는 "본인 자녀가 실제로 출석하는 회차"가 없으면 다음 수업으로 보여줄 의미가 없다
+                    // (예: 다른 학생은 있지만 내 자녀는 그날 결석 처리된 경우). 원장/강사는 로스터 자체가 빈 경우다.
+                    continue;
                 }
 
                 if (bestStart == null || occurrenceStart.isBefore(bestStart)) {
                     bestStart = occurrenceStart;
                     bestClass = regularClass;
                     bestSession = session;
+                    bestRoster = visibleRoster;
                 }
                 break; // 이 수업의 가장 이른 유효 후보를 찾았으니 다음 요일은 볼 필요 없다.
             }
@@ -1098,7 +1116,7 @@ public class RegularClassService {
             return Optional.empty();
         }
 
-        List<String> studentNames = regularClassSessionStudentRepository.findBySession_Id(bestSession.getId()).stream()
+        List<String> studentNames = bestRoster.stream()
                 .map(rcss -> {
                     AcademyStudent academyStudent = rcss.getAcademyStudent();
                     String managementName = academyStudent.getManagementName();

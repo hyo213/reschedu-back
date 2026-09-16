@@ -15,6 +15,7 @@ import com.academy.reschedu.domain.member.MemberRepository;
 import com.academy.reschedu.domain.member.MemberRole;
 import com.academy.reschedu.domain.member.StudentRepository;
 import com.academy.reschedu.domain.regularclass.dto.ChangeClassTeacherRequest;
+import com.academy.reschedu.domain.regularclass.dto.NextClassResponse;
 import com.academy.reschedu.domain.regularclass.dto.RegularClassCreateRequest;
 import com.academy.reschedu.domain.regularclass.dto.RegularClassUpdateRequest;
 import com.academy.reschedu.domain.regularclass.dto.TimeSlotRequest;
@@ -438,6 +439,52 @@ class RegularClassServiceTest {
             int issuedCount = regularClassService.applyHolidayToSessions(academy, monday);
 
             assertThat(issuedCount).isEqualTo(0);
+        }
+    }
+
+    @Nested
+    class GetNextClassForMyChildren {
+
+        @Test
+        void 같은_반_다른_학생_이름은_노출되지_않고_본인_자녀만_노출된다() {
+            Member parent = new Member("parent@test.com", "encoded", "학부모", "010-0000-0099", MemberRole.PARENT, academy);
+            ReflectionTestUtils.setField(parent, "id", 20L);
+            when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
+
+            com.academy.reschedu.domain.member.Student myChildStudent =
+                    new com.academy.reschedu.domain.member.Student("내아이", null, "MALE", null, parent);
+            UUID myChildUuid = UUID.randomUUID();
+            ReflectionTestUtils.setField(myChildStudent, "uuid", myChildUuid);
+            AcademyStudent myChild = new AcademyStudent(academy, myChildStudent, null, null, true, null, null, null, null, null);
+            ReflectionTestUtils.setField(myChild, "id", 701L);
+
+            com.academy.reschedu.domain.member.Student otherChildStudent =
+                    new com.academy.reschedu.domain.member.Student("다른아이", null, "MALE", null, admin);
+            AcademyStudent otherChild = new AcademyStudent(academy, otherChildStudent, null, null, true, null, null, null, null, null);
+            ReflectionTestUtils.setField(otherChild, "id", 702L);
+
+            RegularClass regularClass = buildClass(10);
+            when(regularClassStudentRepository.findByAcademyStudent_Student_Parent_Id(20L))
+                    .thenReturn(List.of(new RegularClassStudent(regularClass, myChild)));
+            when(studentRepository.findByParentId(20L)).thenReturn(List.of(myChildStudent));
+
+            when(regularClassSessionRepository.findByRegularClass_IdAndDate(eq(500L), any(LocalDate.class)))
+                    .thenReturn(Optional.empty());
+            when(academyHolidayRepository.findByAcademyIdAndDate(eq(1L), any(LocalDate.class)))
+                    .thenReturn(Optional.empty());
+            when(regularClassStudentRepository.findByRegularClass_Id(500L)).thenReturn(List.of());
+            // ensureSession이 매번 id 없는 새 세션을 만들므로(mock save가 id를 채워주지 않음), 어느 후보
+            // 날짜에서 걸리든 같은 로스터(내 아이 + 다른 아이)가 나오도록 null id로 스텁해둔다.
+            when(regularClassSessionStudentRepository.findBySession_Id(null)).thenReturn(List.of(
+                    new RegularClassSessionStudent(null, myChild, false),
+                    new RegularClassSessionStudent(null, otherChild, false)
+            ));
+
+            Optional<NextClassResponse> result = regularClassService.getNextClassForMyChildren();
+
+            assertThat(result).isPresent();
+            assertThat(result.get().studentNames()).containsExactly("내아이");
+            assertThat(result.get().currentCount()).isEqualTo(1);
         }
     }
 }
