@@ -877,7 +877,9 @@ public class RegularClassService {
                 ? studentRepository.findByParentId(requester.getId()).stream().map(Student::getUuid).collect(Collectors.toSet())
                 : Set.of();
 
-        LocalDate earliestStart = computeEarliestStart(regularClass);
+        // 이 반에 배정 이력이 단 한 번도 없었는지 여부. computeEarliestStart()는 시작일이 null인
+        // 기존 배정도 LocalDate.MIN으로 취급해버려 "배정 이력 있음"과 구분이 안 되므로 별도로 확인한다.
+        boolean neverHadEnrollment = regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).isEmpty();
 
         // 세션 확보·로스터·결석 티켓을 이 주 범위 전체에 대해 벌크 조회한다.
         Map<LocalDate, RegularClassSession> sessionsByDate = ensureSessionsForWeek(regularClass, monday, sunday, candidateDates);
@@ -896,8 +898,10 @@ public class RegularClassService {
             Set<UUID> absentStudentUuids = absentUuidsByDate.getOrDefault(date, Set.of());
             List<RegularClassSessionStudent> sessionRoster = rosterBySessionId.getOrDefault(session.getId(), List.of());
 
-            // 로스터가 비어 있고 아직 시작 전(인계 대기 등)인 회차는 렌더링하지 않는다. 신규 반은 항상 표시된다.
-            if (!session.isHolidayCancelled() && sessionRoster.isEmpty() && date.isBefore(earliestStart)) {
+            // 로스터가 비어 있는 회차는 렌더링하지 않는다 — 아직 시작 전(인계 대기 등)이거나, 배정됐던
+            // 학생의 수강 기간이 전부 만료된 경우 모두 포함. 단, 이 반에 배정 이력이 아예 없는 신규
+            // 반은 관리자가 학생을 배정할 수 있도록 항상 표시한다.
+            if (!session.isHolidayCancelled() && sessionRoster.isEmpty() && !neverHadEnrollment) {
                 continue;
             }
 
