@@ -164,6 +164,32 @@ class AiSummaryServiceTest {
         }
 
         @Test
+        void 학생_상황이_바뀌면_같은_날짜여도_다른_캐시_키로_Gemini를_다시_호출한다() {
+            // 결석 신청/재등록 등으로 하루 안에 상황이 바뀌어도, 날짜 기반 캐시였다면 다음날까지 옛
+            // 문장이 남아있었을 시나리오 — 해시 기반 캐시는 상황이 바뀌면 키 자체가 달라져야 한다.
+            LocalDate today = LocalDate.now();
+            LocalDate monthStart = today.withDayOfMonth(1);
+            when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
+            when(academyStudentRepository.findByStudent_Parent_Id(10L)).thenReturn(List.of(academyStudent));
+            when(bucket.get()).thenReturn(null);
+            when(makeupTicketRepository.findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(40L, MakeupTicketStatus.UNUSED))
+                    .thenReturn(List.of());
+            when(makeupTicketRepository.countByAcademyStudent_IdAndStatus(40L, MakeupTicketStatus.USED)).thenReturn(0L);
+            when(geminiClient.generate(anyString(), anyString())).thenReturn(Optional.of("충분히 긴 테스트용 요약 문장입니다"));
+
+            when(makeupTicketRepository.countByAcademyStudent_IdAndAbsentDateBetween(40L, monthStart, today)).thenReturn(0L);
+            aiSummaryService.getMyChildrenAiSummaries(); // 1차: 결석 0회일 때
+
+            when(makeupTicketRepository.countByAcademyStudent_IdAndAbsentDateBetween(40L, monthStart, today)).thenReturn(1L);
+            aiSummaryService.getMyChildrenAiSummaries(); // 2차: 그사이 결석 신청이 들어와 1회로 바뀜
+
+            ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+            verify(redissonClient, org.mockito.Mockito.times(2)).getBucket(keyCaptor.capture());
+            assertThat(keyCaptor.getAllValues().get(0)).isNotEqualTo(keyCaptor.getAllValues().get(1));
+            verify(geminiClient, org.mockito.Mockito.times(2)).generate(anyString(), anyString());
+        }
+
+        @Test
         void 첫_응답이_너무_짧으면_재시도해서_유효한_문장이_나오면_그걸_캐시에_저장한다() {
             LocalDate today = LocalDate.now();
             when(currentMemberProvider.getCurrentMember()).thenReturn(parent);

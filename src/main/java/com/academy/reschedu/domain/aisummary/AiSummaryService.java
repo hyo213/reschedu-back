@@ -19,9 +19,13 @@ import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,9 +33,10 @@ import java.util.Map;
 /**
  * 학부모 대시보드 "이번 달 자녀 리포트" — 출결(결석)/보강권/수강 기간 통계는 매번 DB에서 새로 계산하고
  * (가벼운 조회라 캐싱할 이유가 없고, 그래야 결석 신청 직후 대시보드로 돌아와도 바로 반영된다),
- * {@link GeminiClient}가 그 숫자를 자연어로 서술한 "문장"만 학생당 하루 1번 Redis에 캐싱한다(비용/지연이
- * 큰 건 LLM 호출뿐이므로). 문장이 몇 시간 정도 최신 활동을 못 따라가는 건 괜찮지만, 숫자가 안 맞으면
- * "방금 한 행동이 반영 안 된 버그"처럼 보이므로 숫자와 문장의 캐싱 정책을 분리했다.
+ * {@link GeminiClient}가 그 숫자를 자연어로 서술한 "문장"만 Redis에 캐싱한다(비용/지연이 큰 건 LLM
+ * 호출뿐이므로). 캐시 키는 날짜가 아니라 Gemini에 보내는 입력(userMessage)의 해시다 — 그래야 결석 신청,
+ * 보강권 변동, 재등록 등으로 이 학생의 실제 상황이 바뀔 때만 자동으로 새 문장이 생성되고, 안 바뀌었으면
+ * 계속 캐시를 재사용한다. 모든 mutation 지점에 캐시 무효화 코드를 흩뿌리지 않아도 되는 대신이다.
  */
 @Slf4j
 @Service
@@ -40,6 +45,9 @@ import java.util.Map;
 public class AiSummaryService {
 
     private static final String CACHE_KEY_PREFIX = "ai-summary-text:";
+    // 프레시함은 이제 해시가 보장하므로, TTL은 순수히 Redis 저장 공간 정리용(오래 안 쓰인 캐시 자연 소멸).
+    // 수강기간남은일수가 매일 -1씩 바뀌는 학생은 어차피 해시가 매일 갈리므로 TTL을 길게 잡아도 이득이
+    // 없다 — 길게 잡을수록 도달 불가능해진 옛 키가 Redis에 더 오래 남을 뿐이라 짧게 유지한다.
     private static final Duration CACHE_TTL = Duration.ofHours(26);
     private static final long EXPIRING_SOON_DAYS = 7;
     private static final int MIN_VALID_SUMMARY_LENGTH = 15;
@@ -95,9 +103,9 @@ public class AiSummaryService {
                 .findByAcademy_Id(academyStudent.getAcademy().getId())
                 .map(MakeupTicketPolicy::isAllowUseAfterEnrollmentExpired)
                 .orElse(true);
-        String summaryText = getOrGenerateSummaryText(academyStudent, studentName, academyName, absenceCountThisMonth,
-                availableTicketCount, expiringSoonTicketCount, usedTicketCount, enrollmentDaysRemaining,
-                allowUseAfterEnrollmentExpired);
+        String userMessage = userMessage(studentName, academyName, absenceCountThisMonth, availableTicketCount,
+                expiringSoonTicketCount, usedTicketCount, enrollmentDaysRemaining, allowUseAfterEnrollmentExpired);
+        String summaryText = getOrGenerateSummaryText(academyStudent, userMessage);
 
         return new ChildAiSummaryResponse(
                 academyStudent.getStudent().getUuid(),
@@ -114,23 +122,20 @@ public class AiSummaryService {
     }
 
     /**
-     * 문장만 학생당 하루 1번 캐싱 — 캐시 미스일 때만 Gemini를 호출한다.
+     * 문장은 학생당 "입력이 바뀌지 않는 한" 캐싱한다 — 캐시 키에 날짜 대신 이 학생의 출결/보강권/수강기간
+     * 데이터(userMessage)의 해시를 쓴다. 그래서 결석 신청, 보강권 변동, 재등록 등으로 이 학생의 상황이
+     * 실제로 바뀌면 해시가 달라져 자동으로 새 문장이 생성되고, 아무것도 안 바뀌었으면 며칠이 지나도 그대로
+     * 캐시를 재사용한다 — 매 mutation 지점마다 캐시 무효화 코드를 심어둘 필요가 없다.
      * thinkingBudget:0으로 추론을 꺼둔 상태에서는 가끔 "테스트자녀1 학생"처럼 문장이 채 끝나지도 않고
-     * 비정상적으로 짧게 끊기는 응답이 드물게 온다. 그대로 캐싱하면 하루 종일 깨진 문장이 노출되므로,
+     * 비정상적으로 짧게 끊기는 응답이 드물게 온다. 그대로 캐싱하면 한참 깨진 문장이 노출되므로,
      * 너무 짧은 응답은 무효로 보고 한 번 더 재시도한다.
      */
-    private String getOrGenerateSummaryText(AcademyStudent academyStudent, String studentName, String academyName,
-                                             long absenceCountThisMonth, long availableTicketCount,
-                                             long expiringSoonTicketCount, long usedTicketCount,
-                                             Long enrollmentDaysRemaining, boolean allowUseAfterEnrollmentExpired) {
-        RBucket<String> bucket = redissonClient.getBucket(cacheKey(academyStudent));
+    private String getOrGenerateSummaryText(AcademyStudent academyStudent, String userMessage) {
+        RBucket<String> bucket = redissonClient.getBucket(cacheKey(academyStudent, userMessage));
         String cached = bucket.get();
         if (cached != null) {
             return cached;
         }
-
-        String userMessage = userMessage(studentName, academyName, absenceCountThisMonth, availableTicketCount,
-                expiringSoonTicketCount, usedTicketCount, enrollmentDaysRemaining, allowUseAfterEnrollmentExpired);
 
         String generated = null;
         for (int attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
@@ -153,8 +158,20 @@ public class AiSummaryService {
         return text != null && text.trim().length() >= MIN_VALID_SUMMARY_LENGTH;
     }
 
-    private String cacheKey(AcademyStudent academyStudent) {
-        return CACHE_KEY_PREFIX + academyStudent.getId() + ":" + LocalDate.now();
+    private String cacheKey(AcademyStudent academyStudent, String userMessage) {
+        return CACHE_KEY_PREFIX + academyStudent.getId() + ":" + sha256(userMessage);
+    }
+
+    /** 캐시 키 discriminator일 뿐 보안 용도가 아니라, 충돌 위험이 낮은 선에서 짧게(16자) 잘라 쓴다. */
+    private String sha256(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash, 0, 8);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256은 모든 JVM이 표준으로 제공하므로 사실상 도달하지 않는다.
+            throw new IllegalStateException("SHA-256 알고리즘을 사용할 수 없습니다.", e);
+        }
     }
 
     private String systemInstruction() {
