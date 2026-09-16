@@ -20,6 +20,7 @@
 | 학원 휴무 → 보강권 | 휴무일 지정 시 보강권 발급 여부 선택 가능(체크 시 지정일 학생 전원 자동 발급), 취소 시 미사용은 회수 + 이미 매칭된 미래 보강도 자동 취소·복원(과거 보강은 유지) |
 | 보강 신청/매칭 | 보강권으로 여석 신청, 원장/강사는 직접 매칭 → [동시성](#redis-분산락-기반-보강-신청-동시성-제어) |
 | 실시간 알림 | 가입 승인 대기 / 보강권 발급을 SSE로 즉시 push |
+| AI 학부모 리포트 | 자녀 출결·보강권·수강 기간 현황을 Gemini가 자연어로 요약 → [설계](#ai-학부모-리포트) |
 
 ---
 
@@ -92,6 +93,33 @@ private String extraAllowedOrigins; // 환경 변수로 정확한 Origin만 콤�
 
 ---
 
+## AI 학부모 리포트
+
+학부모 대시보드에 자녀의 출결(결석)·보강권·수강 기간 현황을 Gemini API로 2~3문장 요약해 보여줍니다.
+캐시 무효화 코드 없이 항상 최신 상태를 유지하는 게 핵심입니다.
+LLM 호출은 비용·지연이 커서 캐싱이 필요했습니다. 처음엔 "학생당 하루 1번"처럼 시간 기준으로
+캐싱해봤는데, 그 사이 결석 신청·보강권 사용처럼 실제 상황이 바뀌어도 캐시된 옛 문장이 그대로 남아
+반영이 안 되는 문제가 있었습니다.
+
+캐시 키를 **날짜 대신 Gemini에 보내는 입력 데이터의 SHA-256 해시**로 바꿔 해결했습니다. 학생 상황이
+실제로 바뀌면 해시가 자동으로 달라져 새 문장이 생성되고, 안 바뀌었으면 캐시를 그대로 재사용합니다.
+결석/보강권 변동, 재등록 등 캐시를 무효화해야 할 모든 지점에 무효화 코드를 심을 필요가 없습니다.
+숫자(출결/보강권/D-day)는 캐시하지 않고 매번 DB에서 실시간 계산해, 문장만 캐시로 인해 방금 한
+행동이 반영 안 된 것처럼 보이는 상황도 없앴습니다.
+
+```java
+private String cacheKey(AcademyStudent academyStudent, String userMessage) {
+    return CACHE_KEY_PREFIX + academyStudent.getId() + ":" + sha256(userMessage);
+}
+```
+
+추론을 끈(`thinkingBudget: 0`) 상태에서는 Gemini가 드물게 문장이 채 끝나기도 전에 비정상적으로 짧게
+끊긴 응답(예: "OO 학생"에서 종료)을 낼 때가 있습니다. 응답 길이가 임계치 미만이면 자동으로 한 번 더
+재시도하고, 그래도 실패하면 AI 문장 없이 숫자만 보여주는 graceful degradation으로 처리했습니다 —
+LLM 호출 실패가 화면 전체를 깨뜨리지 않도록 한 겹 방어선을 둔 셈입니다.
+
+---
+
 ## Tech Stack
 
 | 영역 | 스택 |
@@ -100,6 +128,7 @@ private String extraAllowedOrigins; // 환경 변수로 정확한 Origin만 콤�
 | 조회 | Spring Data JPA + QueryDSL |
 | 동시성 | Redis(Redisson 분산락) |
 | 비동기 | Kafka(인증 메일, SSE 알림) |
+| AI | Google Gemini API (`gemini-3.6-flash`) — 입력 해시 기반 캐싱으로 호출 최소화 |
 | DB | PostgreSQL 16 |
 | 관측 | Micrometer + Prometheus + Grafana (락 대기/실패, Kafka 컨슈머 랙만 선택 계측) |
 | 테스트 | JUnit5 + Mockito + Testcontainers |
@@ -123,6 +152,7 @@ private String extraAllowedOrigins; // 환경 변수로 정확한 Origin만 콤�
 | `JWT_SECRET` | ✅ | Base64 인코딩 HMAC 키 |
 | `RESCHEDU_MAIL_USERNAME` / `RESCHEDU_MAIL_PASSWORD` | 선택 | 없으면 이메일 인증만 비활성 |
 | `APP_CORS_EXTRA_ALLOWED_ORIGINS` | 선택 | 외부 테스트용 정확한 오리진(콤마 구분) |
+| `GEMINI_API_KEY` | 선택 | 없으면 AI 리포트가 문장 없이 숫자만 표시 |
 
 ```bash
 docker compose up -d redis kafka prometheus grafana   # Postgres는 로컬에 이미 떠 있어야 함
