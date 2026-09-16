@@ -24,10 +24,12 @@ public interface MakeupTicketRepository extends JpaRepository<MakeupTicket, Long
 
     long countByAcademyStudent_IdAndStatus(Long academyStudentId, MakeupTicketStatus status);
 
-    // 🎯 [AI 리포트] 이번 달 결석(보강권 발급) 횟수 집계용 — absentDate 기준(발급일이 아니라 실제 결석일)
-    long countByAcademyStudent_IdAndAbsentDateBetween(Long academyStudentId, LocalDate start, LocalDate end);
-
     List<MakeupTicket> findByAcademyStudent_Academy_IdAndStatus(Long academyId, MakeupTicketStatus status);
+
+    // 🎯 [AI 리포트] 학부모의 자녀가 여러 명이어도 학생별로 반복 조회하지 않도록, 대상 학생 전원의 보강권을
+    // 한 번에 가져와 메모리에서 학생별로 묶어 쓰기 위함(N+1 회피). 상태 무관 전체를 가져와 결석 횟수/
+    // 사용가능/사용완료를 전부 이 한 결과로 계산한다.
+    List<MakeupTicket> findByAcademyStudent_IdIn(List<Long> academyStudentIds);
 
     // 특정 정규 수업의 특정 날짜에 결석 처리(어떤 사유든)된 수강생들의 학원등록장부 id 목록 조회용
     List<MakeupTicket> findByOriginClass_IdAndAbsentDate(Long regularClassId, LocalDate absentDate);

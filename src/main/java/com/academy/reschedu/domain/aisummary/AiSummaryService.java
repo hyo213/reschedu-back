@@ -29,6 +29,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 학부모 대시보드 "이번 달 자녀 리포트" — 출결(결석)/보강권/수강 기간 통계는 매번 DB에서 새로 계산하고
@@ -61,36 +62,62 @@ public class AiSummaryService {
     private final GeminiClient geminiClient;
     private final ObjectMapper objectMapper;
 
-    /** 학부모 전용: 본인 자녀 전원(자녀×학원 등록 단위)의 리포트를 반환한다. */
+    /**
+     * 학부모 전용: 본인 자녀 전원(자녀×학원 등록 단위)의 리포트를 반환한다.
+     * 자녀가 여러 명이어도 보강권/정책 조회는 학생당 반복하지 않고 딱 한 번씩만 한다(N+1 회피) —
+     * 대상 학생 id 전체로 보강권을 한 번에 가져오고, 대상 학원 id 전체로 정책을 한 번에 가져온 뒤
+     * 메모리에서 학생별로 묶어 쓴다.
+     */
     public List<ChildAiSummaryResponse> getMyChildrenAiSummaries() {
         Member parent = currentMemberProvider.getCurrentMember();
         if (parent.getRole() != MemberRole.PARENT) {
             throw new IllegalStateException("학부모 계정만 조회할 수 있습니다.");
         }
 
-        return academyStudentRepository.findByStudent_Parent_Id(parent.getId()).stream()
+        List<AcademyStudent> academyStudents = academyStudentRepository.findByStudent_Parent_Id(parent.getId()).stream()
                 .filter(AcademyStudent::isApproved)
-                .map(this::buildSummary)
+                .toList();
+        if (academyStudents.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> academyStudentIds = academyStudents.stream().map(AcademyStudent::getId).toList();
+        Map<Long, List<MakeupTicket>> ticketsByStudentId = makeupTicketRepository.findByAcademyStudent_IdIn(academyStudentIds)
+                .stream()
+                .collect(Collectors.groupingBy(t -> t.getAcademyStudent().getId()));
+
+        List<Long> academyIds = academyStudents.stream().map(as -> as.getAcademy().getId()).distinct().toList();
+        Map<Long, Boolean> allowAfterExpiredByAcademyId = makeupTicketPolicyRepository.findByAcademy_IdIn(academyIds)
+                .stream()
+                .collect(Collectors.toMap(p -> p.getAcademy().getId(), MakeupTicketPolicy::isAllowUseAfterEnrollmentExpired));
+
+        return academyStudents.stream()
+                .map(as -> buildSummary(as,
+                        ticketsByStudentId.getOrDefault(as.getId(), List.of()),
+                        allowAfterExpiredByAcademyId.getOrDefault(as.getAcademy().getId(), true)))
                 .toList();
     }
 
-    private ChildAiSummaryResponse buildSummary(AcademyStudent academyStudent) {
+    private ChildAiSummaryResponse buildSummary(AcademyStudent academyStudent, List<MakeupTicket> tickets,
+                                                 boolean allowUseAfterEnrollmentExpired) {
         LocalDate today = LocalDate.now();
         LocalDate monthStart = today.withDayOfMonth(1);
 
-        long absenceCountThisMonth = makeupTicketRepository
-                .countByAcademyStudent_IdAndAbsentDateBetween(academyStudent.getId(), monthStart, today);
+        long absenceCountThisMonth = tickets.stream()
+                .filter(t -> t.getAbsentDate() != null
+                        && !t.getAbsentDate().isBefore(monthStart) && !t.getAbsentDate().isAfter(today))
+                .count();
 
-        List<MakeupTicket> unusedTickets = makeupTicketRepository.findByAcademyStudent_IdAndStatusOrderByAbsentDateDesc(
-                academyStudent.getId(), MakeupTicketStatus.UNUSED);
+        List<MakeupTicket> unusedTickets = tickets.stream()
+                .filter(t -> t.getStatus() == MakeupTicketStatus.UNUSED)
+                .toList();
         long availableTicketCount = unusedTickets.stream().filter(MakeupTicket::isCurrentlyValid).count();
         long expiringSoonTicketCount = unusedTickets.stream()
                 .filter(MakeupTicket::isCurrentlyValid)
                 .filter(t -> t.getExpiredAt() != null
                         && !t.getExpiredAt().toLocalDate().isAfter(today.plusDays(EXPIRING_SOON_DAYS)))
                 .count();
-        long usedTicketCount = makeupTicketRepository
-                .countByAcademyStudent_IdAndStatus(academyStudent.getId(), MakeupTicketStatus.USED);
+        long usedTicketCount = tickets.stream().filter(t -> t.getStatus() == MakeupTicketStatus.USED).count();
 
         LocalDate enrollmentEndDate = academyStudent.getEnrollmentEndDate();
         Long enrollmentDaysRemaining = enrollmentEndDate != null
@@ -99,10 +126,6 @@ public class AiSummaryService {
 
         String studentName = academyStudent.getStudent().getName();
         String academyName = academyStudent.getAcademy().getName();
-        boolean allowUseAfterEnrollmentExpired = makeupTicketPolicyRepository
-                .findByAcademy_Id(academyStudent.getAcademy().getId())
-                .map(MakeupTicketPolicy::isAllowUseAfterEnrollmentExpired)
-                .orElse(true);
         String userMessage = userMessage(studentName, academyName, absenceCountThisMonth, availableTicketCount,
                 expiringSoonTicketCount, usedTicketCount, enrollmentDaysRemaining, allowUseAfterEnrollmentExpired);
         String summaryText = getOrGenerateSummaryText(academyStudent, userMessage);
