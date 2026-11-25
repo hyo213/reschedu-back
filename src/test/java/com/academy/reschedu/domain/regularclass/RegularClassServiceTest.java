@@ -443,6 +443,62 @@ class RegularClassServiceTest {
     }
 
     @Nested
+    class IsOpenForMakeupOn {
+
+        private final LocalDate date = LocalDate.of(2026, 11, 30);
+
+        private AcademyStudent studentEnrolledUntil(LocalDate enrollmentEnd) {
+            AcademyStudent student = new AcademyStudent(academy, null, null, null, true, null, null, null, null, null);
+            student.updateEnrollmentPeriod(null, enrollmentEnd);
+            return student;
+        }
+
+        @Test
+        void 배정된_학생이_모두_수강기간_만료면_보강_불가() {
+            RegularClass regularClass = buildClass(10);
+            when(regularClassStudentRepository.findByRegularClass_Id(500L)).thenReturn(List.of(
+                    new RegularClassStudent(regularClass, studentEnrolledUntil(date.minusDays(1)))));
+
+            assertThat(regularClassService.isOpenForMakeupOn(regularClass, date)).isFalse();
+        }
+
+        @Test
+        void 해당_날짜에_유효한_학생이_한_명이라도_있으면_보강_가능() {
+            RegularClass regularClass = buildClass(10);
+            when(regularClassStudentRepository.findByRegularClass_Id(500L)).thenReturn(List.of(
+                    new RegularClassStudent(regularClass, studentEnrolledUntil(date.minusDays(1))),
+                    new RegularClassStudent(regularClass, studentEnrolledUntil(date))));
+
+            assertThat(regularClassService.isOpenForMakeupOn(regularClass, date)).isTrue();
+        }
+
+        @Test
+        void 반_배정이_끝난_학생만_있으면_보강_불가() {
+            RegularClass regularClass = buildClass(10);
+            when(regularClassStudentRepository.findByRegularClass_Id(500L)).thenReturn(List.of(
+                    new RegularClassStudent(regularClass, studentEnrolledUntil(null), null, date.minusDays(1))));
+
+            assertThat(regularClassService.isOpenForMakeupOn(regularClass, date)).isFalse();
+        }
+
+        @Test
+        void 배정_이력이_없는_신규_반은_보강_가능() {
+            RegularClass regularClass = buildClass(10);
+            when(regularClassStudentRepository.findByRegularClass_Id(500L)).thenReturn(List.of());
+
+            assertThat(regularClassService.isOpenForMakeupOn(regularClass, date)).isTrue();
+        }
+
+        @Test
+        void 종료된_반은_보강_불가() {
+            RegularClass regularClass = buildClass(10);
+            regularClass.discontinue(date);
+
+            assertThat(regularClassService.isOpenForMakeupOn(regularClass, date)).isFalse();
+        }
+    }
+
+    @Nested
     class GetNextClassForMyChildren {
 
         @Test

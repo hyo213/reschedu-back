@@ -173,6 +173,10 @@ public class MakeupRequestService {
             throw new IllegalArgumentException("이미 지난 날짜로는 보강을 신청할 수 없습니다.");
         }
 
+        if (!regularClassService.isOpenForMakeupOn(targetClass, request.targetDate())) {
+            throw new IllegalStateException("종료되었거나 수강 중인 학생이 없는 수업에는 보강을 편성할 수 없습니다.");
+        }
+
         RegularClassSession targetSession = regularClassService.ensureSessionForMakeupBooking(targetClass, request.targetDate());
         if (targetSession.isHolidayCancelled()) {
             throw new IllegalStateException("휴무일로 지정된 날짜에는 보강 신청을 할 수 없습니다.");

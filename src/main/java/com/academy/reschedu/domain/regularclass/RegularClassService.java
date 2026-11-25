@@ -389,12 +389,15 @@ public class RegularClassService {
                 .count();
     }
 
-    /** 이 반의 가장 이른 배정 시작일. 배정 이력이 없으면(신규 반) LocalDate.MIN — "항상 시작된 것"으로 취급. */
-    private LocalDate computeEarliestStart(RegularClass regularClass) {
-        return regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).stream()
-                .map(rcs -> rcs.getStartDate() == null ? LocalDate.MIN : rcs.getStartDate())
-                .min(Comparator.naturalOrder())
-                .orElse(LocalDate.MIN);
+    /** 보강 가능 여부: 종료되지 않았고, 그 날짜에 배정·수강기간이 모두 유효한 학생이 있는 반. 배정 이력 없는 신규 반은 허용. */
+    public boolean isOpenForMakeupOn(RegularClass regularClass, LocalDate date) {
+        return !regularClass.isDiscontinuedOn(date)
+                && hasActiveRosterOn(regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()), date);
+    }
+
+    private static boolean hasActiveRosterOn(List<RegularClassStudent> roster, LocalDate date) {
+        return roster.isEmpty() || roster.stream()
+                .anyMatch(rcs -> rcs.isActiveOn(date) && rcs.getAcademyStudent().isActiveOn(date));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -877,8 +880,7 @@ public class RegularClassService {
                 ? studentRepository.findByParentId(requester.getId()).stream().map(Student::getUuid).collect(Collectors.toSet())
                 : Set.of();
 
-        // 이 반에 배정 이력이 단 한 번도 없었는지 여부. computeEarliestStart()는 시작일이 null인
-        // 기존 배정도 LocalDate.MIN으로 취급해버려 "배정 이력 있음"과 구분이 안 되므로 별도로 확인한다.
+        // 이 반에 배정 이력이 단 한 번도 없었는지 여부.
         boolean neverHadEnrollment = regularClassStudentRepository.findByRegularClass_Id(regularClass.getId()).isEmpty();
 
         // 세션 확보·로스터·결석 티켓을 이 주 범위 전체에 대해 벌크 조회한다.
@@ -952,11 +954,14 @@ public class RegularClassService {
 
         List<MakeupSlotResponse> slots = new ArrayList<>();
         for (RegularClass regularClass : regularClassRepository.findByAcademyId(academyId)) {
+            List<RegularClassStudent> roster = regularClassStudentRepository.findByRegularClass_Id(regularClass.getId());
             List<LocalDate> candidateDates = new ArrayList<>();
-            // 지난 수업도 표시한다 — 결석/보강 처리를 놓친 경우 사후에도 매칭할 수 있어야 한다. 반 종료 이후는 제외.
+            // 지난 수업도 표시한다 — 결석/보강 처리를 놓친 경우 사후에도 매칭할 수 있어야 한다.
+            // 반 종료 이후, 그리고 그 날짜에 유효한 수강생이 없는 반(전원 수강기간 만료/배정 시작 전)은 제외.
             for (int i = 0; i < 7; i++) {
                 LocalDate date = monday.plusDays(i);
-                if (regularClass.getDaysOfWeek().contains(date.getDayOfWeek()) && !regularClass.isDiscontinuedOn(date)) {
+                if (regularClass.getDaysOfWeek().contains(date.getDayOfWeek()) && !regularClass.isDiscontinuedOn(date)
+                        && hasActiveRosterOn(roster, date)) {
                     candidateDates.add(date);
                 }
             }
@@ -964,7 +969,6 @@ public class RegularClassService {
                 continue;
             }
 
-            LocalDate earliestStart = computeEarliestStart(regularClass);
             Map<LocalDate, RegularClassSession> sessionsByDate = ensureSessionsForWeek(regularClass, monday, sunday, candidateDates);
 
             List<Long> sessionIds = sessionsByDate.values().stream().map(RegularClassSession::getId).toList();
@@ -991,10 +995,6 @@ public class RegularClassService {
             for (LocalDate date : candidateDates) {
                 RegularClassSession session = sessionsByDate.get(date);
                 if (session.isHolidayCancelled()) {
-                    continue;
-                }
-
-                if (date.isBefore(earliestStart)) {
                     continue;
                 }
 

@@ -43,6 +43,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -141,6 +143,9 @@ class MakeupRequestServiceTest {
         // 다루는 테스트에서만 개별적으로 다시 스텁한다.
         lenient().when(makeupRequestRepository.countByTargetRegularClass_IdAndTargetDateAndStatus(
                 anyLong(), any(), any())).thenReturn(0L);
+
+        // 대상 반은 기본적으로 보강 가능(종료 전, 유효 수강생 있음)
+        lenient().when(regularClassService.isOpenForMakeupOn(any(), any())).thenReturn(true);
     }
 
     private MakeupTicket unusedTicket() {
@@ -412,6 +417,24 @@ class MakeupRequestServiceTest {
             assertThatThrownBy(() -> makeupRequestService.createRequest(request))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("이미 정원이 가득");
+        }
+
+        @Test
+        void 종료됐거나_유효한_수강생이_없는_반에는_신청할_수_없다() {
+            when(currentMemberProvider.getCurrentMember()).thenReturn(parent);
+            when(studentRepository.findByUuid(child.getUuid())).thenReturn(java.util.Optional.of(child));
+            when(regularClassRepository.findByUuid(targetClass.getUuid())).thenReturn(java.util.Optional.of(targetClass));
+            when(academyStudentRepository.findByStudentUuidAndAcademyId(child.getUuid(), 1L))
+                    .thenReturn(java.util.Optional.of(academyStudent));
+            when(regularClassService.isOpenForMakeupOn(targetClass, targetDate)).thenReturn(false);
+
+            MakeupRequestCreateRequest request = new MakeupRequestCreateRequest(
+                    child.getUuid(), targetClass.getUuid(), targetDate);
+
+            assertThatThrownBy(() -> makeupRequestService.createRequest(request))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("수강 중인 학생이 없는 수업");
+            verify(makeupRequestRepository, never()).save(any());
         }
 
         @Test
